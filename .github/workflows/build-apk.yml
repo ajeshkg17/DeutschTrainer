@@ -2,7 +2,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ "main", "redesign-html-port" ]
+    branches: [ "main", "redesign-html-port", "multi-quiz-voice" ]
 jobs:
   build:
     runs-on: ubuntu-latest
