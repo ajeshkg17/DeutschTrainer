@@ -162,7 +162,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE `attempts` ADD COLUMN `quizSetId` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `attempts` ADD COLUMN `quizSetId` INTEGER")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_attempts_quizSetId` ON `attempts` (`quizSetId`)")
             }
         }
