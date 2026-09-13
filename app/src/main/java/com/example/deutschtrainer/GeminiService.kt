@@ -45,7 +45,7 @@ Give an integer score from 1 to 10.
 4-5 = several important mistakes.
 1-3 = major errors or meaning substantially lost.
 
-Do not punish a valid alternative translation.
+Do not punish a valid alternative translation. Judge meaning, grammar, word order, case, tense and naturalness. If the learner used speech-to-text, treat the submitted text exactly like a typed answer and do not speculate about pronunciation.
 
 Return ONLY valid JSON in this exact structure:
 {
@@ -71,19 +71,24 @@ Return ONLY valid JSON in this exact structure:
 
     suspend fun generateQuestions(count: Int, level: String, topic: String, focus: String, model: AiModel): List<GeneratedQuestion> {
         val prompt = """
-Create $count English-to-German translation practice questions.
+Create exactly $count English-to-German translation practice questions.
 
 CEFR level: $level
 Topic: $topic
 Grammar focus: $focus
 
-Requirements:
-- English sentence only as each question.
-- Natural everyday, academic and professional situations.
-- Suitable for $level.
-- Vary sentence structure.
-- No German answer or hints.
-- No duplicates.
+Learning-design requirements:
+- Each item must be an English sentence that the learner will translate into German.
+- Keep every sentence clearly connected to the requested topic.
+- Keep vocabulary and sentence complexity appropriate for $level.
+- If the grammar focus is specific, make most questions genuinely require that grammar point rather than merely mentioning it in metadata.
+- If the focus is Mixed grammar, use a balanced variety of useful grammar structures for the level.
+- Vary sentence length, tense, clause structure, subject, vocabulary and communicative situation.
+- Include a realistic mixture of statements, requests, questions, reasons, conditions and time relationships where suitable.
+- Do not produce duplicate or near-duplicate sentences inside the set.
+- Do not give German answers, translations, hints or explanations.
+- Avoid trick questions and unnecessarily obscure vocabulary.
+- Make the set useful for repeated real-world practice rather than a list of tiny variations of one sentence.
 
 Return ONLY valid JSON:
 {
@@ -110,7 +115,7 @@ Return ONLY valid JSON:
                     )
                 )
             }
-        }
+        }.distinctBy { it.english.trim().lowercase() }.take(count)
     }
 
     suspend fun explain(
@@ -143,10 +148,10 @@ Explain:
 1. What was correct.
 2. Each important mistake and why.
 3. Relevant German grammar rule.
-4. Better formulation.
+4. A better formulation if useful.
 5. Two short German examples using the same grammar point.
 
-Use English for explanations and German for examples.
+Use clear English for explanations and German for examples. Be concise enough for a learner to review on a phone.
 """.trimIndent()
         return generate(prompt, model)
     }
