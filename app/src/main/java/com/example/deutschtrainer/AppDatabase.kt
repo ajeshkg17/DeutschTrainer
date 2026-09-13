@@ -62,12 +62,13 @@ data class QuizSetEntity(
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index("questionId"), Index("profileId")]
+    indices = [Index("questionId"), Index("profileId"), Index("quizSetId")]
 )
 data class AttemptEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val questionId: Long,
     val profileId: Long = 1,
+    val quizSetId: Long? = null,
     val answer: String,
     val score: Int,
     val correctedTranslation: String,
@@ -119,7 +120,7 @@ interface QuizDao {
 
 @Database(
     entities = [ProfileEntity::class, QuestionEntity::class, AttemptEntity::class, QuizSetEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -159,12 +160,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `attempts` ADD COLUMN `quizSetId` INTEGER DEFAULT NULL")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_attempts_quizSetId` ON `attempts` (`quizSetId`)")
+            }
+        }
+
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 "deutsch_trainer.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
                 .also { INSTANCE = it }
         }
