@@ -295,6 +295,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     AttemptEntity(
                         questionId = question.id,
                         profileId = pid,
+                        quizSetId = snapshot.selectedQuizSetId,
                         answer = answer.trim(),
                         score = evaluation.score,
                         correctedTranslation = evaluation.correctedTranslation,
@@ -394,32 +395,67 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun ensureQuizLibrary(profileId: Long, includeAllExisting: Boolean) {
         if (dao.quizSetCount(profileId) > 0) return
-        val all = dao.questions().first()
+        val all = dao.questions().first().sortedWith(compareBy<QuestionEntity> { it.createdAt }.thenBy { it.id })
         if (all.isEmpty()) return
 
-        val selected = if (includeAllExisting) {
-            all.sortedWith(compareBy<QuestionEntity> { it.createdAt }.thenBy { it.id })
+        val batches = if (includeAllExisting) {
+            splitQuestionBatches(all)
         } else {
-            all.sortedWith(compareBy<QuestionEntity> { it.createdAt }.thenBy { it.id }).take(10)
+            listOf(all.take(10))
         }
-        val title = if (selected.size > 10) "Previous questions" else "Starter B1"
-        val level = selected.map { it.level }.distinct().singleOrNull() ?: "Mixed"
-        val topic = selected.map { it.topic }.distinct().singleOrNull() ?: "Mixed topics"
-        val focus = selected.map { it.focus }.distinct().singleOrNull() ?: "Mixed grammar"
-        val id = dao.insertQuizSet(
-            QuizSetEntity(
-                profileId = profileId,
-                title = title,
-                level = level,
-                topic = topic,
-                focus = focus,
-                questionIdsJson = JSONArray(selected.map { it.id }).toString()
+
+        var newestSetId: Long? = null
+        var newestFirstQuestionId: Long? = null
+
+        batches.filter { it.isNotEmpty() }.forEachIndexed { index, batch ->
+            val level = batch.map { it.level }.distinct().singleOrNull() ?: "Mixed"
+            val topic = batch.map { it.topic }.distinct().singleOrNull() ?: "Mixed topics"
+            val focus = batch.map { it.focus }.distinct().singleOrNull() ?: "Mixed grammar"
+            val title = when {
+                index == 0 && batch.size == 10 && level == "B1" -> "Starter B1"
+                topic != "Mixed topics" && focus != "Mixed grammar" -> "$topic · $focus"
+                topic != "Mixed topics" -> topic
+                else -> "Recovered quiz ${index + 1}"
+            }
+
+            val setId = dao.insertQuizSet(
+                QuizSetEntity(
+                    profileId = profileId,
+                    title = title,
+                    level = level,
+                    topic = topic,
+                    focus = focus,
+                    questionIdsJson = JSONArray(batch.map { it.id }).toString(),
+                    createdAt = batch.maxOf { it.createdAt }
+                )
             )
-        )
-        prefs.edit()
-            .putLong(selectedQuizKey(profileId), id)
-            .putLong(selectedQuestionKey(id), selected.first().id)
-            .apply()
+            prefs.edit().putLong(selectedQuestionKey(setId), batch.first().id).apply()
+            newestSetId = setId
+            newestFirstQuestionId = batch.first().id
+        }
+
+        if (newestSetId != null) {
+            prefs.edit()
+                .putLong(selectedQuizKey(profileId), newestSetId!!)
+                .putLong(selectedQuestionKey(newestSetId!!), newestFirstQuestionId!!)
+                .apply()
+        }
+    }
+
+    private fun splitQuestionBatches(questions: List<QuestionEntity>): List<List<QuestionEntity>> {
+        if (questions.isEmpty()) return emptyList()
+        val batches = mutableListOf<MutableList<QuestionEntity>>()
+        var current = mutableListOf<QuestionEntity>()
+        questions.forEach { question ->
+            val previous = current.lastOrNull()
+            if (previous != null && question.createdAt - previous.createdAt > 15_000L) {
+                batches += current
+                current = mutableListOf()
+            }
+            current += question
+        }
+        if (current.isNotEmpty()) batches += current
+        return batches
     }
 
     private fun selectedQuizKey(profileId: Long) = "selected_quiz_set_$profileId"
