@@ -62,12 +62,17 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             persistedQuizId != null && quizSets.any { it.id == persistedQuizId } -> persistedQuizId
             else -> quizSets.firstOrNull()?.id
         }
+
         val selectedQuiz = quizSets.firstOrNull { it.id == selectedQuizId }
         val ids = parseQuestionIds(selectedQuiz?.questionIdsJson)
         val byId = allQuestions.associateBy { it.id }
         val quizQuestions = ids.mapNotNull { byId[it] }
+        val persistedQuestionId = selectedQuizId?.let {
+            prefs.getLong(selectedQuestionKey(it), -1L).takeIf { value -> value > 0L }
+        }
         val selectedQuestion = s.selectedQuestionId
             ?.takeIf { id -> quizQuestions.any { it.id == id } }
+            ?: persistedQuestionId?.takeIf { id -> quizQuestions.any { it.id == id } }
             ?: quizQuestions.firstOrNull()?.id
 
         s.copy(
@@ -160,21 +165,76 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteQuizSet(id: Long) {
+        val snapshot = state.value
+        val pid = snapshot.selectedProfileId
         viewModelScope.launch {
             dao.deleteQuizSet(id)
+            if (pid != null && snapshot.selectedQuizSetId == id) {
+                prefs.edit().remove(selectedQuizKey(pid)).apply()
+            }
+            prefs.edit().remove(selectedQuestionKey(id)).apply()
             local.update {
                 it.copy(
                     selectedQuizSetId = if (it.selectedQuizSetId == id) null else it.selectedQuizSetId,
                     selectedQuestionId = null,
                     evaluation = null,
                     explanation = null,
-                    message = "Quiz removed from this profile"
+                    message = "Quiz removed from this profile. Graded history was kept."
+                )
+            }
+        }
+    }
+
+    fun createMistakesQuiz() {
+        val snapshot = state.value
+        val pid = snapshot.selectedProfileId ?: return
+        val latestPerQuestion = snapshot.attempts.distinctBy { it.attempt.questionId }
+        val weak = latestPerQuestion.filter { it.attempt.score < 8 }.take(20)
+        val ids = weak.map { it.attempt.questionId }.distinct()
+        if (ids.isEmpty()) {
+            local.update { it.copy(message = "No current low-score answers to review. Answers below 8/10 will appear here.") }
+            return
+        }
+
+        val grammar = weak.flatMap { item ->
+            runCatching {
+                val array = JSONArray(item.attempt.grammarTopicsJson)
+                List(array.length()) { index -> array.optString(index) }.filter { it.isNotBlank() }
+            }.getOrDefault(emptyList())
+        }.distinct().take(3)
+        val focus = grammar.takeIf { it.isNotEmpty() }?.joinToString(", ") ?: "Recent weak areas"
+
+        viewModelScope.launch {
+            val setId = dao.insertQuizSet(
+                QuizSetEntity(
+                    profileId = pid,
+                    title = "Mistakes review (${ids.size})",
+                    level = "Mixed",
+                    topic = "Adaptive review",
+                    focus = focus,
+                    questionIdsJson = JSONArray(ids).toString()
+                )
+            )
+            prefs.edit()
+                .putLong(selectedQuizKey(pid), setId)
+                .putLong(selectedQuestionKey(setId), ids.first())
+                .apply()
+            local.update {
+                it.copy(
+                    selectedQuizSetId = setId,
+                    selectedQuestionId = ids.first(),
+                    evaluation = null,
+                    explanation = null,
+                    message = "Created a review quiz from ${ids.size} recent weak answers"
                 )
             }
         }
     }
 
     fun selectQuestion(id: Long) {
+        state.value.selectedQuizSetId?.let { quizId ->
+            prefs.edit().putLong(selectedQuestionKey(quizId), id).apply()
+        }
         local.update { it.copy(selectedQuestionId = id, evaluation = null, explanation = null, message = null) }
     }
 
@@ -222,15 +282,15 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun grade(answer: String) {
-        val s = state.value
-        val question = s.questions.firstOrNull { it.id == s.selectedQuestionId } ?: return
-        val pid = s.selectedProfileId ?: return
+        val snapshot = state.value
+        val question = snapshot.questions.firstOrNull { it.id == snapshot.selectedQuestionId } ?: return
+        val pid = snapshot.selectedProfileId ?: return
         if (answer.isBlank()) return
 
         viewModelScope.launch {
             local.update { it.copy(loading = true, message = null, explanation = null) }
             try {
-                val evaluation = ai.evaluate(question.english, answer.trim(), question.level, s.selectedModel)
+                val evaluation = ai.evaluate(question.english, answer.trim(), question.level, snapshot.selectedModel)
                 dao.insertAttempt(
                     AttemptEntity(
                         questionId = question.id,
@@ -270,13 +330,13 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val generated = ai.generateQuestions(count, level, safeTopic, safeFocus, model)
                 val ids = mutableListOf<Long>()
-                for (q in generated) {
+                for (question in generated) {
                     ids += dao.insertQuestion(
                         QuestionEntity(
-                            english = q.english,
-                            level = q.level,
-                            topic = q.topic,
-                            focus = q.focus
+                            english = question.english,
+                            level = question.level,
+                            topic = question.topic,
+                            focus = question.focus
                         )
                     )
                 }
@@ -291,7 +351,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                         questionIdsJson = JSONArray(ids).toString()
                     )
                 )
-                prefs.edit().putLong(selectedQuizKey(pid), setId).apply()
+                val editor = prefs.edit().putLong(selectedQuizKey(pid), setId)
+                ids.firstOrNull()?.let { editor.putLong(selectedQuestionKey(setId), it) }
+                editor.apply()
                 local.update {
                     it.copy(
                         loading = false,
@@ -309,9 +371,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun explainLast(answer: String) {
-        val s = state.value
-        val question = s.questions.firstOrNull { it.id == s.selectedQuestionId } ?: return
-        val evaluation = s.evaluation ?: return
+        val snapshot = state.value
+        val question = snapshot.questions.firstOrNull { it.id == snapshot.selectedQuestionId } ?: return
+        val evaluation = snapshot.evaluation ?: return
         viewModelScope.launch {
             local.update { it.copy(loading = true, message = null) }
             try {
@@ -321,7 +383,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                     evaluation.score,
                     evaluation.correctedTranslation,
                     evaluation.shortFeedback,
-                    s.selectedModel
+                    snapshot.selectedModel
                 )
                 local.update { it.copy(loading = false, explanation = text) }
             } catch (e: Exception) {
@@ -354,10 +416,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 questionIdsJson = JSONArray(selected.map { it.id }).toString()
             )
         )
-        prefs.edit().putLong(selectedQuizKey(profileId), id).apply()
+        prefs.edit()
+            .putLong(selectedQuizKey(profileId), id)
+            .putLong(selectedQuestionKey(id), selected.first().id)
+            .apply()
     }
 
     private fun selectedQuizKey(profileId: Long) = "selected_quiz_set_$profileId"
+    private fun selectedQuestionKey(quizId: Long) = "selected_question_$quizId"
 
     private fun parseQuestionIds(json: String?): List<Long> {
         if (json.isNullOrBlank()) return emptyList()
