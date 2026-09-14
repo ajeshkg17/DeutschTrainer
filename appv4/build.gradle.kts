@@ -13,8 +13,8 @@ android {
         applicationId = "com.ajesh.deutschtrainer.v4"
         minSdk = 23
         targetSdk = 35
-        versionCode = 40_000 + ciRunNumber
-        versionName = "4.0.$ciRunNumber"
+        versionCode = 41_000 + ciRunNumber
+        versionName = "4.1.$ciRunNumber"
     }
 
     compileOptions {
@@ -22,4 +22,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+}
+
+dependencies {
+    implementation("androidx.activity:activity-ktx:1.10.1")
+    implementation("com.google.android.gms:play-services-auth:21.6.0")
 }
