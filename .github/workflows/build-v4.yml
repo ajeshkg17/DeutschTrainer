@@ -2,9 +2,10 @@ name: Build DeutschTrainer V4
 on:
   workflow_dispatch:
   push:
-    branches: [ "main", "html-first-v4" ]
+    branches: [ "main", "html-first-v4", "drive-sync-v4" ]
     paths:
       - "appv4/**"
+      - "scripts/**"
       - "settings.gradle.kts"
       - ".github/workflows/build-v4.yml"
 
@@ -20,9 +21,14 @@ jobs:
           node --check appv4/src/main/assets/quiz.js
           node --check appv4/src/main/assets/learn.js
           node --check appv4/src/main/assets/settings.js
+          node --check appv4/src/main/assets/drive-integration.js
+          node --check appv4/src/main/assets/drive-sync.js
           node --check appv4/src/main/assets/boot.js
           grep -q "V4 · HTML-FIRST BUILD" appv4/src/main/assets/core.js
-          grep -q "com.ajesh.deutschtrainer.v4" appv4/src/main/assets/settings.js
+          grep -q "Google Drive sync" appv4/src/main/assets/drive-integration.js
+          grep -q "No silent overwrites" appv4/src/main/assets/drive-sync.js
+      - name: Inject Drive bridge into V4 MainActivity
+        run: python3 scripts/inject-drive-sync.py
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -43,10 +49,12 @@ jobs:
           if [ ! -f ~/.android/debug.keystore ]; then
             keytool -genkeypair -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
+      - name: Print V4 OAuth signing fingerprint
+        run: keytool -list -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey | grep -E "SHA1:|SHA-1:"
       - name: Build only the fresh V4 module
         run: gradle :appv4:assembleDebug --stacktrace
       - name: Upload V4 APK
         uses: actions/upload-artifact@v4
         with:
-          name: DeutschTrainer-V4
+          name: DeutschTrainer-V4-DriveSync
           path: appv4/build/outputs/apk/debug/appv4-debug.apk
