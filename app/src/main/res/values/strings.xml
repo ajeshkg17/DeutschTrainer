@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Deutsch Trainer</string>
+    <string name="shortcut_backup_short">Backup</string>
+    <string name="shortcut_backup_long">Backup &amp; restore profile</string>
+</resources>
