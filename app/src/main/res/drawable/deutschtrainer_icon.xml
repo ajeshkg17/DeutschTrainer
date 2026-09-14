@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <path
+        android:fillColor="#FFF9F6"
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+
+    <!-- Open book -->
+    <path
+        android:fillColor="#151515"
+        android:pathData="M12,69 L12,32 C25,31 38,34 50,42 L50,82 C39,75 26,72 12,73 Z" />
+    <path
+        android:fillColor="#151515"
+        android:pathData="M96,69 L96,32 C83,31 70,34 58,42 L58,82 C69,75 82,72 96,73 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M17,36 C29,36 39,39 47,45 L47,74 C38,69 28,67 17,67 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M91,36 C79,36 69,39 61,45 L61,74 C70,69 80,67 91,67 Z" />
+    <path
+        android:fillColor="#151515"
+        android:pathData="M50,82 L54,86 L58,82 L58,87 C56,87 55,88 54,89 C53,88 52,87 50,87 Z" />
+
+    <!-- Black leaf -->
+    <path
+        android:fillColor="#151515"
+        android:pathData="M50,37 C39,33 34,24 36,14 C46,18 52,26 50,37 Z" />
+    <path
+        android:fillColor="#151515"
+        android:pathData="M54,31 C49,21 52,12 61,7 C64,17 62,25 54,31 Z" />
+
+    <!-- German flag-inspired flame/leaves -->
+    <path
+        android:fillColor="#F0443A"
+        android:pathData="M58,42 C61,27 72,18 88,17 C87,31 77,40 58,49 Z" />
+    <path
+        android:fillColor="#F5A623"
+        android:pathData="M58,51 C66,39 78,33 92,35 C88,49 77,56 58,60 Z" />
+    <path
+        android:fillColor="#FFD447"
+        android:pathData="M58,62 C67,53 77,50 89,52 C86,64 76,71 58,75 Z" />
+</vector>
