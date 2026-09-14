@@ -14,6 +14,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Validate HTML app JavaScript
+        run: |
+          node --check appv4/src/main/assets/core.js
+          node --check appv4/src/main/assets/quiz.js
+          node --check appv4/src/main/assets/learn.js
+          node --check appv4/src/main/assets/settings.js
+          node --check appv4/src/main/assets/boot.js
+          grep -q "V4 · HTML-FIRST BUILD" appv4/src/main/assets/core.js
+          grep -q "com.ajesh.deutschtrainer.v4" appv4/src/main/assets/settings.js
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
