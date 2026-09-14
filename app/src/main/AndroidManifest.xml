@@ -9,9 +9,8 @@
         android:theme="@style/Theme.DeutschTrainer">
 
         <activity
-            android:name=".TrainerActivity"
-            android:exported="true"
-            android:windowSoftInputMode="adjustResize">
+            android:name=".NextLauncherActivity"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -22,9 +21,14 @@
         </activity>
 
         <activity
+            android:name=".TrainerActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".BackupRestoreActivity"
             android:exported="false"
-            android:parentActivityName=".TrainerActivity" />
+            android:parentActivityName=".NextLauncherActivity" />
 
         <activity
             android:name=".AiErrorDialogActivity"
