@@ -2,24 +2,55 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ "main", "redesign-html-port", "multi-quiz-voice" ]
+    branches: [ "main", "redesign-html-port", "multi-quiz-voice", "backup-icon-ai-popup" ]
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+
+      # GitHub runners are temporary. Without keeping this key, every debug APK
+      # is signed by a different certificate and Android refuses to install it
+      # over the previous build. Cache one app-specific debug key so future
+      # builds from the same branch keep the same signing identity.
+      - name: Restore stable Android debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: deutschtrainer-android-debug-signing-v1
+
+      - name: Create signing key if this is the first stable build
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=DeutschTrainer Stable Debug,O=DeutschTrainer,C=DE" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000
+          fi
+
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

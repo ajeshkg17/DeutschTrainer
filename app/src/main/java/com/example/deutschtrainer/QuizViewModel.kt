@@ -308,6 +308,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 local.update { it.copy(loading = false, evaluation = evaluation) }
             } catch (e: Exception) {
                 local.update { it.copy(loading = false, message = e.message ?: "Grading failed") }
+                AiErrorDialogActivity.show(getApplication(), "grading your answer", e)
             }
         }
     }
@@ -367,6 +368,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (e: Exception) {
                 local.update { it.copy(loading = false, message = e.message ?: "Generation failed") }
+                AiErrorDialogActivity.show(getApplication(), "generating a quiz", e)
             }
         }
     }
@@ -389,6 +391,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 local.update { it.copy(loading = false, explanation = text) }
             } catch (e: Exception) {
                 local.update { it.copy(loading = false, message = e.message ?: "Explanation failed") }
+                AiErrorDialogActivity.show(getApplication(), "creating the explanation", e)
             }
         }
     }

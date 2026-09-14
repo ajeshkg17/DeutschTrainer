@@ -92,8 +92,17 @@ interface QuizDao {
     @Insert
     suspend fun insertProfile(profile: ProfileEntity): Long
 
+    @Query("SELECT * FROM profiles WHERE id = :id LIMIT 1")
+    suspend fun profileSnapshot(id: Long): ProfileEntity?
+
+    @Query("SELECT * FROM profiles ORDER BY id ASC")
+    suspend fun profilesSnapshot(): List<ProfileEntity>
+
     @Query("SELECT * FROM questions ORDER BY id DESC")
     fun questions(): Flow<List<QuestionEntity>>
+
+    @Query("SELECT * FROM questions ORDER BY id ASC")
+    suspend fun questionsSnapshot(): List<QuestionEntity>
 
     @Insert
     suspend fun insertQuestion(q: QuestionEntity): Long
@@ -102,11 +111,17 @@ interface QuizDao {
     @Query("SELECT * FROM attempts WHERE profileId = :profileId ORDER BY id DESC")
     fun attempts(profileId: Long): Flow<List<AttemptWithQuestion>>
 
+    @Query("SELECT * FROM attempts WHERE profileId = :profileId ORDER BY createdAt ASC, id ASC")
+    suspend fun attemptsSnapshot(profileId: Long): List<AttemptEntity>
+
     @Insert
     suspend fun insertAttempt(a: AttemptEntity): Long
 
     @Query("SELECT * FROM quiz_sets WHERE profileId = :profileId ORDER BY createdAt DESC, id DESC")
     fun quizSets(profileId: Long): Flow<List<QuizSetEntity>>
+
+    @Query("SELECT * FROM quiz_sets WHERE profileId = :profileId ORDER BY createdAt ASC, id ASC")
+    suspend fun quizSetsSnapshot(profileId: Long): List<QuizSetEntity>
 
     @Insert
     suspend fun insertQuizSet(quizSet: QuizSetEntity): Long
