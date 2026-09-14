@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+<title>DeutschTrainer V4</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="loading" class="loading"></div>
+<section class="screen active" id="profiles"></section>
+<section class="screen" id="home"></section>
+<section class="screen" id="quizzes"></section>
+<section class="screen" id="create"></section>
+<section class="screen" id="question"></section>
+<section class="screen" id="result"></section>
+<section class="screen" id="progress"></section>
+<section class="screen" id="more"></section>
+<section class="screen" id="history"></section>
+<section class="screen" id="settings"></section>
+<nav class="bottom" id="bottom">
+<button class="nav active" data-screen="home" onclick="go('home')"><span>⌂</span>Home</button>
+<button class="nav" data-screen="quizzes" onclick="go('quizzes')"><span>▣</span>Quizzes</button>
+<button class="nav" data-screen="create" onclick="go('create')"><span>＋</span>Create</button>
+<button class="nav" data-screen="progress" onclick="go('progress')"><span>▥</span>Progress</button>
+<button class="nav" data-screen="more" onclick="go('more')"><span>•••</span>More</button>
+</nav>
+<div class="modalShade" id="modal"><div class="modal" id="modalBody"></div></div>
+<div class="toast" id="toast"></div>
+<script src="core.js"></script>
+<script src="quiz.js"></script>
+<script src="learn.js"></script>
+<script src="settings.js"></script>
+<script src="boot.js"></script>
+</body>
+</html>
