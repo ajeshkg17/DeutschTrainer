@@ -20,7 +20,7 @@ class AiErrorDialogActivity : Activity() {
             .setNegativeButton("Close") { _, _ -> finish() }
             .setPositiveButton("Open app") { _, _ ->
                 startActivity(
-                    Intent(this, MainActivity::class.java).apply {
+                    Intent(this, TrainerActivity::class.java).apply {
                         addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     }
                 )
