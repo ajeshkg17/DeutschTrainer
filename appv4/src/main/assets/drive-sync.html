@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>DeutschTrainer Cloud Sync</title>
+<link rel="stylesheet" href="drive-sync.css">
+</head>
+<body>
+<div class="loading" id="loading"></div>
+<main class="page">
+  <header class="top">
+    <button class="iconBtn" onclick="DriveNative.close()">←</button>
+    <div class="grow"><div class="eyebrow">DEUTSCHTRAINER V4</div><h1>Cloud sync</h1></div>
+    <div class="cloud">☁</div>
+  </header>
+  <div id="content"></div>
+</main>
+<div class="shade" id="modal"><div class="modal" id="modalBody"></div></div>
+<div class="toast" id="toast"></div>
+<script src="drive-sync.js"></script>
+</body>
+</html>
