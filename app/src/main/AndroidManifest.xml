@@ -5,7 +5,7 @@
         android:allowBackup="false"
         android:icon="@drawable/deutschtrainer_icon"
         android:roundIcon="@drawable/deutschtrainer_icon"
-        android:label="Deutsch Trainer"
+        android:label="DeutschTrainer Next"
         android:theme="@style/Theme.DeutschTrainer">
 
         <activity
