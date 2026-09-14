@@ -1,1 +1,11 @@
-<resources><style name="Theme.DeutschTrainer" parent="android:style/Theme.Material.Light.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:windowLightStatusBar">true</item></style></resources>
+<resources>
+    <style name="Theme.DeutschTrainer" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <style name="Theme.DeutschTrainer.Dialog" parent="android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+    </style>
+</resources>
