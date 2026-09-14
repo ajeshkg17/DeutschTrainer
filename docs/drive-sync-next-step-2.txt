@@ -1,0 +1,1 @@
+Drive sync implementation follows the HTML prototype and will be built in an isolated branch before merging.
