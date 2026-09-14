@@ -5,6 +5,8 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+
 android {
     namespace = "com.example.deutschtrainer"
     compileSdk = 35
@@ -13,8 +15,8 @@ android {
         applicationId = "com.example.deutschtrainer"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 30_000 + ciRunNumber
+        versionName = "3.0.$ciRunNumber"
     }
 
     compileOptions {
