@@ -27,4 +27,5 @@ android {
 dependencies {
     implementation("androidx.activity:activity-ktx:1.10.1")
     implementation("com.google.android.gms:play-services-auth:21.6.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
