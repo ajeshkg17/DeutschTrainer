@@ -12,11 +12,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.deutschtrainer"
+        applicationId = "com.example.deutschtrainer.next"
         minSdk = 23
         targetSdk = 35
-        versionCode = 30_000 + ciRunNumber
-        versionName = "3.0.$ciRunNumber"
+        versionCode = 31_000 + ciRunNumber
+        versionName = "3.1-next.$ciRunNumber"
     }
 
     compileOptions {
