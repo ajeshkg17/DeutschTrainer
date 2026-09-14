@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "DeutschTrainer"
-include(":app")
+include(":app", ":appv4")
