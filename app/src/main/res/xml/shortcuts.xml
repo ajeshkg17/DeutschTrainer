@@ -8,7 +8,7 @@
         android:shortcutLongLabel="@string/shortcut_backup_long">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="com.example.deutschtrainer"
+            android:targetPackage="com.example.deutschtrainer.next"
             android:targetClass="com.example.deutschtrainer.BackupRestoreActivity" />
     </shortcut>
 </shortcuts>
