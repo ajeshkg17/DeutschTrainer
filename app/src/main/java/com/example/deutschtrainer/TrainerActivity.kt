@@ -760,6 +760,7 @@ private fun V2QuestionScreen(
 
         key(profileId, question.id) {
             RecordedAnswer(
+                draftId = draftKey,
                 enabled = state.selectedModel.provider == AiProvider.GEMINI && state.geminiKeyConfigured,
                 loading = state.loading,
                 serverError = state.recordingError,

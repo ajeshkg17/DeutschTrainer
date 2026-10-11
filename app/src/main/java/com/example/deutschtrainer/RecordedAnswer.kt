@@ -23,6 +23,7 @@ import java.io.File
 /** Recording is deliberately separate from speech recognition: pauses never stop it. */
 @Composable
 fun RecordedAnswer(
+    draftId: String,
     enabled: Boolean,
     loading: Boolean,
     serverError: String? = null,
@@ -33,7 +34,8 @@ fun RecordedAnswer(
     val lifecycleOwner = LocalLifecycleOwner.current
     var recorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var player by remember { mutableStateOf<MediaPlayer?>(null) }
-    var file by remember { mutableStateOf<File?>(null) }
+    val savedRecording = remember(draftId) { File(context.cacheDir, "speaking-answer-$draftId.m4a") }
+    var file by remember(draftId) { mutableStateOf(savedRecording.takeIf { it.exists() && it.length() > 0L }) }
     var recording by remember { mutableStateOf(false) }
     var playing by remember { mutableStateOf(false) }
     var startedAt by remember { mutableLongStateOf(0) }
@@ -68,7 +70,7 @@ fun RecordedAnswer(
         file?.delete()
         file = null
         error = null
-        val output = runCatching { File.createTempFile("speaking-", ".m4a", context.cacheDir) }.getOrElse {
+        val output = runCatching { savedRecording.apply { createNewFile() } }.getOrElse {
             error = "Could not save a recording. Check available storage and try again."
             return
         }
@@ -118,7 +120,8 @@ fun RecordedAnswer(
             if (recording) runCatching { recorder?.stop() }
             recorder?.release()
             player?.release()
-            file?.delete()
+            // Keep the stopped draft across rotation, navigation, and failed requests.
+            // Success, discard, or re-recording removes it.
             currentBusy(false)
         }
     }

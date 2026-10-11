@@ -292,7 +292,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             val upload = File.createTempFile("speaking-upload-", ".m4a", getApplication<Application>().cacheDir)
             try {
                 audio.copyTo(upload, overwrite = true)
-                gradeAnswer("", upload)
+                gradeAnswer("", upload, audio)
             } catch (e: Exception) {
                 upload.delete()
                 throw e
@@ -303,7 +303,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun gradeAnswer(answer: String, audio: File?) {
+    private fun gradeAnswer(answer: String, audio: File?, originalRecording: File? = null) {
         val snapshot = state.value
         val question = snapshot.questions.firstOrNull { it.id == snapshot.selectedQuestionId }
         val pid = snapshot.selectedProfileId
@@ -339,6 +339,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                         grammarTopicsJson = JSONArray(evaluation.grammarTopics).toString()
                     )
                 )
+                originalRecording?.delete()
                 local.update { it.copy(loading = false, evaluation = evaluation) }
             } catch (e: Exception) {
                 val message = e.message ?: "Grading failed. Please try again."

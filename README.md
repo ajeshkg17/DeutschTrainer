@@ -42,7 +42,8 @@ translation plus audible pronunciation and fluency. Feedback includes specific s
 advice where the audio permits it; these are practice estimates, not certified speaking scores.
 DeepSeek remains available for text grading. Recorded-answer assessment requires Gemini.
 The transcript and feedback are saved in the existing history and portable backups. Audio stays
-in temporary app storage until the question is closed or the recording is replaced/discarded;
+in temporary app storage until successfully checked or replaced/discarded. Unfinished recordings
+are recovered when the same learner reopens the question, including after rotation or restart;
 audio is not included in history or backups. If an AI request fails, the recording remains available
 on the question screen for playback and retry.
 
