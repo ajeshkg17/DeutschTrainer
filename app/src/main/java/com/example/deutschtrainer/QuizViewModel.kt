@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.json.JSONArray
+import java.io.File
 
 
 data class UiState(
@@ -281,22 +282,54 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         local.update { it.copy(deepSeekKeyConfigured = false, message = "DeepSeek API key removed from this device.") }
     }
 
-    fun grade(answer: String) {
+    fun grade(answer: String) = gradeAnswer(answer, null)
+
+    fun gradeRecording(audio: File) {
+        if (state.value.loading) return
+        // The request owns its copy so rotation cannot delete audio being uploaded.
+        try {
+            val upload = File.createTempFile("speaking-upload-", ".m4a", getApplication<Application>().cacheDir)
+            try {
+                audio.copyTo(upload, overwrite = true)
+                gradeAnswer("", upload)
+            } catch (e: Exception) {
+                upload.delete()
+                throw e
+            }
+        } catch (e: Exception) {
+            local.update { it.copy(message = "Could not read the recording. Please record again.") }
+            AiErrorDialogActivity.show(getApplication(), "reading your recording", e)
+        }
+    }
+
+    private fun gradeAnswer(answer: String, audio: File?) {
         val snapshot = state.value
-        val question = snapshot.questions.firstOrNull { it.id == snapshot.selectedQuestionId } ?: return
-        val pid = snapshot.selectedProfileId ?: return
-        if (answer.isBlank()) return
+        val question = snapshot.questions.firstOrNull { it.id == snapshot.selectedQuestionId }
+        val pid = snapshot.selectedProfileId
+        if (question == null || pid == null || snapshot.loading || (audio == null && answer.isBlank())) {
+            audio?.delete()
+            return
+        }
+        if (audio != null && (snapshot.selectedModel.provider != AiProvider.GEMINI || !snapshot.geminiKeyConfigured)) {
+            local.update { it.copy(message = "Select a Gemini model and save a Gemini API key in Settings to check recorded answers.") }
+            audio.delete()
+            return
+        }
 
         viewModelScope.launch {
-            local.update { it.copy(loading = true, message = null, explanation = null) }
+            local.update { it.copy(loading = true, message = null, explanation = null, evaluation = null) }
             try {
-                val evaluation = ai.evaluate(question.english, answer.trim(), question.level, snapshot.selectedModel)
+                val evaluation = if (audio == null) {
+                    ai.evaluate(question.english, answer.trim(), question.level, snapshot.selectedModel)
+                } else {
+                    ai.evaluateRecording(question.english, question.level, audio, snapshot.selectedModel)
+                }
                 dao.insertAttempt(
                     AttemptEntity(
                         questionId = question.id,
                         profileId = pid,
                         quizSetId = snapshot.selectedQuizSetId,
-                        answer = answer.trim(),
+                        answer = evaluation.transcript ?: answer.trim(),
                         score = evaluation.score,
                         correctedTranslation = evaluation.correctedTranslation,
                         shortFeedback = evaluation.shortFeedback,
@@ -309,6 +342,8 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 local.update { it.copy(loading = false, message = e.message ?: "Grading failed") }
                 AiErrorDialogActivity.show(getApplication(), "grading your answer", e)
+            } finally {
+                audio?.delete()
             }
         }
     }

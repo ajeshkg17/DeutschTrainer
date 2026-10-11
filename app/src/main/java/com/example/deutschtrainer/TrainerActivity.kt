@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -43,6 +44,7 @@ import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.io.File
 import kotlin.math.roundToInt
 
 private val V2Indigo = Color(0xFF465BD8)
@@ -137,8 +139,16 @@ private fun V2App(
     val state by vm.state.collectAsState()
     var screen by rememberSaveable { mutableStateOf(V2Screen.PROFILE) }
     val answers = remember { mutableStateMapOf<Long, String>() }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     LaunchedEffect(state.evaluation) {
+        state.evaluation?.transcript?.let { transcript ->
+            state.selectedQuestionId?.let { id ->
+                answers[id] = transcript
+                context.getSharedPreferences("answer_drafts", Context.MODE_PRIVATE).edit()
+                    .putString("${state.selectedProfileId ?: 0L}_$id", transcript).apply()
+            }
+        }
         if (state.evaluation != null && screen == V2Screen.QUESTION) screen = V2Screen.RESULT
     }
 
@@ -192,12 +202,13 @@ private fun V2App(
                     onHome = { screen = V2Screen.HOME },
                     onPrevious = vm::previousQuestion,
                     onNext = vm::nextQuestion,
-                    onGrade = vm::grade
+                    onGrade = vm::grade,
+                    onGradeRecording = vm::gradeRecording
                 )
 
                 V2Screen.RESULT -> V2ResultScreen(
                     state = state,
-                    answer = state.selectedQuestionId?.let { answers[it] }.orEmpty(),
+                    answer = state.evaluation?.transcript ?: state.selectedQuestionId?.let { answers[it] }.orEmpty(),
                     onEdit = { screen = V2Screen.QUESTION },
                     onNext = { vm.nextQuestion(); screen = V2Screen.QUESTION },
                     onExplain = vm::explainLast
@@ -412,7 +423,7 @@ private fun V2Home(
             Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 V2Action(Icons.Outlined.AddCircleOutline, "Create a new quiz", "Any topic, level and grammar focus", onCreate)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                V2Action(Icons.Outlined.RecordVoiceOver, "Speak your answers", "German speech-to-text is available inside each question", onQuizzes)
+                V2Action(Icons.Outlined.RecordVoiceOver, "Speak your answers", "Dictate or record for pronunciation and fluency coaching", onQuizzes)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 V2Action(Icons.Outlined.Replay, "Review weak answers", if (mistakes == 0) "No low-score answers yet" else "$mistakes answers scored below 8/10", onReviewMistakes)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -612,7 +623,8 @@ private fun V2QuestionScreen(
     onHome: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onGrade: (String) -> Unit
+    onGrade: (String) -> Unit,
+    onGradeRecording: (File) -> Unit
 ) {
     val session = state.questions
     val question = session.firstOrNull { it.id == state.selectedQuestionId } ?: session.firstOrNull()
@@ -631,6 +643,10 @@ private fun V2QuestionScreen(
     val quiz = state.quizSets.firstOrNull { it.id == state.selectedQuizSetId }
     var speechError by remember { mutableStateOf<String?>(null) }
     var showHint by remember { mutableStateOf(false) }
+    var recordingBusy by remember { mutableStateOf(false) }
+    val controlsEnabled = !recordingBusy && !state.loading
+    BackHandler(enabled = recordingBusy || state.loading) { }
+
 
     fun setAnswer(value: String) {
         answers[question.id] = value
@@ -664,12 +680,12 @@ private fun V2QuestionScreen(
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            FilledTonalIconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, contentDescription = "Back to quizzes") }
+            FilledTonalIconButton(onClick = onBack, enabled = controlsEnabled) { Icon(Icons.Outlined.ArrowBack, contentDescription = "Back to quizzes") }
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("QUESTION ${index + 1} OF ${session.size}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
                 Text(quiz?.title ?: question.topic, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            FilledTonalIconButton(onClick = onHome) { Icon(Icons.Outlined.Home, contentDescription = "Home") }
+            FilledTonalIconButton(onClick = onHome, enabled = controlsEnabled) { Icon(Icons.Outlined.Home, contentDescription = "Home") }
         }
 
         Spacer(Modifier.height(14.dp))
@@ -692,6 +708,7 @@ private fun V2QuestionScreen(
         Text("Your translation", modifier = Modifier.padding(top = 18.dp, bottom = 7.dp), fontWeight = FontWeight.Bold)
         OutlinedTextField(
             value = answer,
+            enabled = controlsEnabled,
             onValueChange = ::setAnswer,
             modifier = Modifier.fillMaxWidth(),
             minLines = 4,
@@ -706,10 +723,11 @@ private fun V2QuestionScreen(
             listOf("ä", "ö", "ü", "ß").forEach { character ->
                 FilledTonalButton(
                     onClick = { setAnswer(answer + character) },
+                    enabled = controlsEnabled,
                     contentPadding = PaddingValues(horizontal = 13.dp, vertical = 8.dp)
                 ) { Text(character, fontWeight = FontWeight.Bold) }
             }
-            FilledTonalButton(onClick = ::startSpeech) {
+            FilledTonalButton(onClick = ::startSpeech, enabled = controlsEnabled) {
                 Icon(Icons.Outlined.Mic, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
                 Text("Speak German", fontWeight = FontWeight.Bold)
@@ -737,13 +755,22 @@ private fun V2QuestionScreen(
             V2InlineNotice("Grammar focus: ${question.focus}. Think about the rule before translating; the hint intentionally does not give the German answer.")
         }
 
+        key(profileId, question.id) {
+            RecordedAnswer(
+                enabled = state.selectedModel.provider == AiProvider.GEMINI && state.geminiKeyConfigured,
+                loading = state.loading,
+                onBusy = { recordingBusy = it },
+                onGrade = onGradeRecording
+            )
+        }
+
         Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = onPrevious, modifier = Modifier.weight(1f).height(52.dp), shape = RoundedCornerShape(16.dp)) {
+            OutlinedButton(onClick = onPrevious, enabled = controlsEnabled, modifier = Modifier.weight(1f).height(52.dp), shape = RoundedCornerShape(16.dp)) {
                 Icon(Icons.Outlined.ArrowBack, contentDescription = null); Spacer(Modifier.width(5.dp)); Text("Back")
             }
             Button(
                 onClick = { onGrade(answer) },
-                enabled = answer.isNotBlank() && !state.loading,
+                enabled = answer.isNotBlank() && controlsEnabled,
                 modifier = Modifier.weight(1.6f).height(52.dp),
                 shape = RoundedCornerShape(16.dp)
             ) {
@@ -752,7 +779,7 @@ private fun V2QuestionScreen(
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onNext) {
+            TextButton(onClick = onNext, enabled = controlsEnabled) {
                 Text("Skip to next"); Spacer(Modifier.width(4.dp)); Icon(Icons.Outlined.ArrowForward, contentDescription = null)
             }
         }
@@ -784,7 +811,7 @@ private fun V2ResultScreen(
             FilledTonalIconButton(onClick = onEdit) { Icon(Icons.Outlined.ArrowBack, contentDescription = "Back") }
             Column(Modifier.padding(start = 12.dp)) {
                 V2Eyebrow("Evaluation")
-                Text("Your answer", fontWeight = FontWeight.Bold)
+                Text(if (evaluation.transcript != null) "Your recorded answer" else "Your answer", fontWeight = FontWeight.Bold)
             }
         }
         Spacer(Modifier.height(14.dp))

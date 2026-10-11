@@ -6,6 +6,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.File
+import android.util.Base64
 
 data class Evaluation(
     val score: Int,
@@ -13,7 +15,8 @@ data class Evaluation(
     val shortFeedback: String,
     val mistakes: List<String>,
     val howToImprove: List<String>,
-    val grammarTopics: List<String>
+    val grammarTopics: List<String>,
+    val transcript: String? = null
 )
 
 data class GeneratedQuestion(
@@ -24,6 +27,38 @@ data class GeneratedQuestion(
 )
 
 class GeminiService(private val keyStore: ApiKeyStore) {
+
+    suspend fun evaluateRecording(english: String, level: String, audio: File, model: AiModel): Evaluation = withContext(Dispatchers.IO) {
+        require(model.provider == AiProvider.GEMINI) { "Select a Gemini model in Settings for speaking feedback." }
+        require(audio.exists() && audio.length() in 1..10_000_000) { "Recording is missing or too large. Please record again." }
+        val prompt = """
+You are a constructive German speaking coach. Listen to the attached learner audio.
+English sentence to translate: $english
+Target CEFR level: $level
+Transcribe the German exactly as spoken, including mistakes. Do not substitute a correct translation.
+If there is no intelligible German speech, return an empty transcript and explain that a new recording is needed.
+Grade translation meaning, grammar and naturalness from 1 to 10; do not punish valid alternatives.
+In short_feedback include separately labelled Pronunciation and Fluency feedback based ONLY on audible evidence:
+German sounds, word stress, rhythm, pauses, hesitations and intelligibility. Quote specific words or timestamps
+when possible, and give concrete practice advice in how_to_improve. Do not infer pronunciation from spelling
+or penalize accent alone. If noise or a short sample prevents assessment, say so. Scores are practice estimates.
+Keep grammar mistakes in mistakes and grammar_topics; keep speaking advice in how_to_improve.
+Return ONLY valid JSON with score (integer), transcript (string), corrected_translation (string),
+short_feedback (string), mistakes (string array), how_to_improve (string array), grammar_topics (string array).
+""".trimIndent()
+        val obj = JSONObject(cleanJson(geminiRequest(prompt, model, audio)))
+        val transcript = obj.optString("transcript").trim()
+        check(transcript.isNotBlank()) { "No intelligible German speech was detected. Listen to your recording and try again." }
+        Evaluation(
+            score = obj.optInt("score", 1).coerceIn(1, 10),
+            correctedTranslation = obj.optString("corrected_translation"),
+            shortFeedback = obj.optString("short_feedback"),
+            mistakes = obj.optJSONArray("mistakes")?.toStringList().orEmpty(),
+            howToImprove = obj.optJSONArray("how_to_improve")?.toStringList().orEmpty(),
+            grammarTopics = obj.optJSONArray("grammar_topics")?.toStringList().orEmpty(),
+            transcript = transcript
+        )
+    }
 
     suspend fun evaluate(english: String, answer: String, level: String, model: AiModel): Evaluation {
         val prompt = """
@@ -163,23 +198,31 @@ Use clear English for explanations and German for examples. Be concise enough fo
         }
     }
 
-    private fun geminiRequest(prompt: String, model: AiModel): String {
+    private fun geminiRequest(prompt: String, model: AiModel, audio: File? = null): String {
         val key = keyStore.geminiKey()
         check(key.isNotBlank()) { "Add your Gemini API key in Settings before continuing." }
         val url = URL("https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=$key")
+        val parts = JSONArray().put(JSONObject().put("text", prompt))
+        if (audio != null) {
+            parts.put(JSONObject().put("inline_data", JSONObject()
+                .put("mime_type", "audio/mp4")
+                .put("data", Base64.encodeToString(audio.readBytes(), Base64.NO_WRAP))))
+        }
         val body = JSONObject().put(
             "contents",
-            JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt))))
+            JSONArray().put(JSONObject().put("parts", parts))
         )
+        if (audio != null) body.put("generationConfig", JSONObject().put("responseMimeType", "application/json"))
         return httpPost(url, body, mapOf("Content-Type" to "application/json")) { root ->
-            root.optJSONArray("candidates")
+            val responseParts = root.optJSONArray("candidates")
                 ?.optJSONObject(0)
                 ?.optJSONObject("content")
                 ?.optJSONArray("parts")
-                ?.optJSONObject(0)
-                ?.optString("text")
-                ?.ifBlank { null }
                 ?: error("Gemini returned no text")
+            (0 until responseParts.length()).mapNotNull { index ->
+                responseParts.optJSONObject(index)?.takeUnless { it.optBoolean("thought") }
+                    ?.optString("text")?.takeIf { it.isNotBlank() }
+            }.joinToString("\n").ifBlank { error("Gemini returned no text") }
         }
     }
 

@@ -28,6 +28,24 @@ Android automatic app-data backup is disabled in this version so an uninstall/re
 ## AI errors
 Grading, quiz-generation and explanation failures now open a readable popup with common guidance for API-key errors, quota/rate limits, network problems, timeouts and temporary server failures. Existing learning data is not changed when an AI request fails.
 
+## Speaking trainer
+
+**Speak German** still uses the phone's speech recognition and allows editing before text grading.
+For uninterrupted practice, select a Gemini model and configure its key in Settings, then choose
+**Record answer** inside a question. Allow microphone permission, speak at your own pace, and tap
+**Stop recording**. Pauses do not end the recording. Recordings are limited to five minutes and
+stop when the app goes into the background. Use **Listen**, **Record again**, or **Discard** before
+choosing **Check recorded answer**.
+
+That button sends the original audio to Gemini, which transcribes the German and evaluates the
+translation plus audible pronunciation and fluency. Feedback includes specific speaking practice
+advice where the audio permits it; these are practice estimates, not certified speaking scores.
+DeepSeek remains available for text grading. Recorded-answer assessment requires Gemini.
+The transcript and feedback are saved in the existing history and portable backups. Audio stays
+in temporary app storage until the question is closed or the recording is replaced/discarded;
+audio is not included in history or backups. If an AI request fails, the recording remains available
+on the question screen for playback and retry.
+
 ## App icon
 The project includes a custom DeutschTrainer launcher icon inspired by an open book and the German black/red/gold palette.
 
