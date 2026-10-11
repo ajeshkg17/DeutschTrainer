@@ -9,6 +9,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -136,18 +139,22 @@ fun RecordedAnswer(
         }
     }
 
-    OutlinedCard(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+    OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Speaking trainer", style = MaterialTheme.typography.titleMedium)
-            Text("Record at your own pace, including pauses (up to 5 minutes). Stop, listen, then send to Gemini for pronunciation and fluency feedback.", style = MaterialTheme.typography.bodySmall)
+            Text(if (recording) "Take your time. Pauses won't stop the recording."
+                else "Record, listen, then get pronunciation and fluency feedback.", style = MaterialTheme.typography.bodySmall)
             if (!enabled) Text("You can record and listen offline. Choose a Gemini model and add its API key in Settings for AI speaking feedback.", style = MaterialTheme.typography.bodySmall)
-            if (recording) Text("Recording • %d:%02d".format(seconds / 60, seconds % 60))
             Button(onClick = {
                 if (recording) stopRecording()
                 else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startRecording()
                 else permission.launch(Manifest.permission.RECORD_AUDIO)
-            }, enabled = recording || !loading) {
-                Text(if (recording) "Stop recording" else if (file == null) "Record answer" else "Record again")
+            }, enabled = recording || !loading, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = if (recording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)) {
+                Icon(if (recording) Icons.Outlined.Stop else Icons.Outlined.Mic, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (recording) "Stop recording • %d:%02d".format(seconds / 60, seconds % 60)
+                    else if (file == null) "Record answer" else "Record again")
             }
             if (file != null && !recording) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

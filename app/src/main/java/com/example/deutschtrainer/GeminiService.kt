@@ -25,8 +25,27 @@ data class GeneratedQuestion(
     val focus: String
 )
 
+data class QuestionHints(val words: List<String>, val grammar: String)
+
 class GeminiService(private val keyStore: ApiKeyStore) {
     private val http = AiHttpClient()
+
+    suspend fun hints(question: QuestionEntity, model: AiModel): QuestionHints {
+        val prompt = """
+Help a German learner translate this English sentence: ${question.english}
+CEFR level: ${question.level}. Grammar focus: ${question.focus}.
+Give 3 to 7 useful vocabulary hints, each as an English word or phrase → German equivalent.
+Include noun articles and plurals where useful, verb infinitives and relevant past participles,
+and important connecting words. Keep words in dictionary form rather than sentence order.
+Give one short, concrete grammar tip in English for this sentence.
+Do not give the full translated sentence or assemble the answer.
+Return ONLY JSON: {"words": ["English → German"], "grammar": "short tip"}.
+""".trimIndent()
+        val obj = JSONObject(cleanJson(generate(prompt, model)))
+        val words = obj.optJSONArray("words")?.toStringList().orEmpty().filter { it.isNotBlank() }.take(7)
+        check(words.isNotEmpty()) { "No word hints were returned. Please try again." }
+        return QuestionHints(words, obj.optString("grammar"))
+    }
 
     suspend fun evaluateRecording(english: String, level: String, audio: File, model: AiModel): Evaluation = withContext(Dispatchers.IO) {
         require(model.provider == AiProvider.GEMINI) { "Select a Gemini model in Settings for speaking feedback." }

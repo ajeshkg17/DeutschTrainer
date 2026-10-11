@@ -205,7 +205,8 @@ private fun V2App(
                     onPrevious = vm::previousQuestion,
                     onNext = vm::nextQuestion,
                     onGrade = vm::grade,
-                    onGradeRecording = vm::gradeRecording
+                    onGradeRecording = vm::gradeRecording,
+                    onHints = vm::loadHints
                 )
 
                 V2Screen.RESULT -> V2ResultScreen(
@@ -627,7 +628,8 @@ private fun V2QuestionScreen(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onGrade: (String) -> Unit,
-    onGradeRecording: (File) -> Unit
+    onGradeRecording: (File) -> Unit,
+    onHints: () -> Unit
 ) {
     val session = state.questions
     val question = session.firstOrNull { it.id == state.selectedQuestionId } ?: session.firstOrNull()
@@ -645,9 +647,10 @@ private fun V2QuestionScreen(
     val index = session.indexOfFirst { it.id == question.id }.coerceAtLeast(0)
     val quiz = state.quizSets.firstOrNull { it.id == state.selectedQuizSetId }
     var speechError by remember { mutableStateOf<String?>(null) }
-    var showHint by remember { mutableStateOf(false) }
+    var showHint by rememberSaveable(question.id) { mutableStateOf(false) }
     var recordingBusy by remember { mutableStateOf(false) }
     val controlsEnabled = !recordingBusy && !state.loading
+    val answerScroll = key(question.id, profileId) { rememberScrollState() }
     BackHandler(enabled = recordingBusy || state.loading) { }
 
 
@@ -681,7 +684,7 @@ private fun V2QuestionScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 10.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             FilledTonalIconButton(onClick = onBack, enabled = controlsEnabled) { Icon(Icons.Outlined.ArrowBack, contentDescription = "Back to quizzes") }
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -691,110 +694,135 @@ private fun V2QuestionScreen(
             FilledTonalIconButton(onClick = onHome, enabled = controlsEnabled) { Icon(Icons.Outlined.Home, contentDescription = "Home") }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(8.dp))
         LinearProgressIndicator(
             progress = { (index + 1) / session.size.toFloat() },
             modifier = Modifier.fillMaxWidth().height(7.dp).clip(CircleShape)
         )
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
 
         Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-            Column(Modifier.padding(20.dp)) {
+            Column(Modifier.heightIn(max = 250.dp).verticalScroll(rememberScrollState()).padding(16.dp)) {
                 V2Badge("English → German")
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(question.english, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(6.dp))
-                Text("Translate naturally. More than one correct answer can be valid.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
-        Text("Your translation", modifier = Modifier.padding(top = 18.dp, bottom = 7.dp), fontWeight = FontWeight.Bold)
-        OutlinedTextField(
-            value = answer,
-            enabled = controlsEnabled,
-            onValueChange = ::setAnswer,
-            modifier = Modifier.fillMaxWidth(),
-            minLines = 4,
-            placeholder = { Text("Write or speak your German sentence…") },
-            shape = RoundedCornerShape(18.dp)
-        )
-
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 9.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf("ä", "ö", "ü", "ß").forEach { character ->
-                FilledTonalButton(
-                    onClick = { setAnswer(answer + character) },
-                    enabled = controlsEnabled,
-                    contentPadding = PaddingValues(horizontal = 13.dp, vertical = 8.dp)
-                ) { Text(character, fontWeight = FontWeight.Bold) }
+        // Keep the question visible while scrolling through recording, hints, and typing.
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(answerScroll)) {
+            Spacer(Modifier.height(10.dp))
+            key(profileId, question.id) {
+                RecordedAnswer(
+                    draftId = draftKey,
+                    enabled = state.selectedModel.provider == AiProvider.GEMINI && state.geminiKeyConfigured,
+                    loading = state.loading,
+                    serverError = state.recordingError,
+                    onBusy = { recordingBusy = it },
+                    onGrade = onGradeRecording
+                )
             }
-            FilledTonalButton(onClick = ::startSpeech, enabled = controlsEnabled) {
-                Icon(Icons.Outlined.Mic, contentDescription = null)
-                Spacer(Modifier.width(6.dp))
-                Text("Speak German", fontWeight = FontWeight.Bold)
+
+            OutlinedButton(
+                onClick = { showHint = !showHint; if (showHint) onHints() },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Icon(Icons.Outlined.Lightbulb, contentDescription = null)
+                Spacer(Modifier.width(7.dp))
+                Text(if (showHint) "Hide word hints" else "Show word hints")
             }
-        }
+            if (showHint) {
+                OutlinedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Words to help you", fontWeight = FontWeight.Bold)
+                        val hints = state.hints[question.id]
+                        when {
+                            hints != null -> {
+                                hints.words.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                                HorizontalDivider()
+                                Text(hints.grammar, style = MaterialTheme.typography.bodyMedium)
+                            }
+                            question.id in state.hintsLoading -> {
+                                LinearProgressIndicator(Modifier.fillMaxWidth())
+                                Text("Preparing word and grammar hints…", style = MaterialTheme.typography.bodySmall)
+                            }
+                            else -> {
+                                Text(state.hintErrors[question.id] ?: "Load vocabulary and a grammar tip for this sentence.",
+                                    style = MaterialTheme.typography.bodySmall)
+                                TextButton(onClick = onHints) { Text("Try loading hints") }
+                            }
+                        }
+                    }
+                }
+            }
 
-        Text(
-            "Speech is transcribed as German (de-DE). You can edit the text before grading.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-        speechError?.let { V2InlineNotice(it, error = true) }
+            Text("Your translation", modifier = Modifier.padding(top = 18.dp, bottom = 7.dp), fontWeight = FontWeight.Bold)
+            OutlinedTextField(
+                value = answer,
+                enabled = controlsEnabled,
+                onValueChange = ::setAnswer,
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
+                placeholder = { Text("Write or speak your German sentence…") },
+                shape = RoundedCornerShape(18.dp)
+            )
 
-        OutlinedButton(
-            onClick = { showHint = !showHint },
-            modifier = Modifier.fillMaxWidth().padding(top = 11.dp),
-            shape = RoundedCornerShape(14.dp)
-        ) {
-            Icon(Icons.Outlined.Lightbulb, contentDescription = null)
-            Spacer(Modifier.width(7.dp))
-            Text(if (showHint) "Hide grammar hint" else "Show grammar hint")
-        }
-        if (showHint) {
-            V2InlineNotice("Grammar focus: ${question.focus}. Think about the rule before translating; the hint intentionally does not give the German answer.")
-        }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 9.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf("ä", "ö", "ü", "ß").forEach { character ->
+                    FilledTonalButton(
+                        onClick = { setAnswer(answer + character) },
+                        enabled = controlsEnabled,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 13.dp, vertical = 8.dp)
+                    ) { Text(character, fontWeight = FontWeight.Bold) }
+                }
+            }
+            FilledTonalButton(onClick = ::startSpeech, enabled = controlsEnabled,
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                    Icon(Icons.Outlined.Mic, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Voice typing", fontWeight = FontWeight.Bold)
+            }
 
-        key(profileId, question.id) {
-            RecordedAnswer(
-                draftId = draftKey,
-                enabled = state.selectedModel.provider == AiProvider.GEMINI && state.geminiKeyConfigured,
-                loading = state.loading,
-                serverError = state.recordingError,
-                onBusy = { recordingBusy = it },
-                onGrade = onGradeRecording
+            Text(
+                "Speech is transcribed as German (de-DE). You can edit the text before grading.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            speechError?.let { V2InlineNotice(it, error = true) }
+
+            Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = onPrevious, enabled = controlsEnabled, modifier = Modifier.weight(1f).height(52.dp), shape = RoundedCornerShape(16.dp)) {
+                    Icon(Icons.Outlined.ArrowBack, contentDescription = null); Spacer(Modifier.width(5.dp)); Text("Back")
+                }
+                Button(
+                    onClick = { onGrade(answer) },
+                    enabled = answer.isNotBlank() && controlsEnabled,
+                    modifier = Modifier.weight(1.6f).height(52.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(if (state.loading) "Checking…" else "Check answer", fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(5.dp)); Icon(Icons.Outlined.Check, contentDescription = null)
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onNext, enabled = controlsEnabled) {
+                    Text("Skip to next"); Spacer(Modifier.width(4.dp)); Icon(Icons.Outlined.ArrowForward, contentDescription = null)
+                }
+            }
+            Text(
+                "Draft answers and your last position are remembered when you switch quizzes.",
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-
-        Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = onPrevious, enabled = controlsEnabled, modifier = Modifier.weight(1f).height(52.dp), shape = RoundedCornerShape(16.dp)) {
-                Icon(Icons.Outlined.ArrowBack, contentDescription = null); Spacer(Modifier.width(5.dp)); Text("Back")
-            }
-            Button(
-                onClick = { onGrade(answer) },
-                enabled = answer.isNotBlank() && controlsEnabled,
-                modifier = Modifier.weight(1.6f).height(52.dp),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Text(if (state.loading) "Checking…" else "Check answer", fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(5.dp)); Icon(Icons.Outlined.Check, contentDescription = null)
-            }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = onNext, enabled = controlsEnabled) {
-                Text("Skip to next"); Spacer(Modifier.width(4.dp)); Icon(Icons.Outlined.ArrowForward, contentDescription = null)
-            }
-        }
-        Text(
-            "Draft answers and your last position are remembered when you switch quizzes.",
-            modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
 

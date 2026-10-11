@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 
 
@@ -23,6 +24,9 @@ data class UiState(
     val loading: Boolean = false,
     val message: String? = null,
     val recordingError: String? = null,
+    val hints: Map<Long, QuestionHints> = emptyMap(),
+    val hintsLoading: Set<Long> = emptySet(),
+    val hintErrors: Map<Long, String> = emptyMap(),
     val selectedModel: AiModel = AiModels.default,
     val geminiKeyConfigured: Boolean = false,
     val deepSeekKeyConfigured: Boolean = false
@@ -33,6 +37,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private val keyStore = ApiKeyStore(app)
     private val prefs = app.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
     private val ai = GeminiService(keyStore)
+    private val hintCache = app.getSharedPreferences("question_hints", Context.MODE_PRIVATE)
 
     private val local = MutableStateFlow(
         UiState(
@@ -407,6 +412,36 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 local.update { it.copy(loading = false, message = e.message ?: "Generation failed") }
                 AiErrorDialogActivity.show(getApplication(), "generating a quiz", e)
+            }
+        }
+    }
+
+    fun loadHints() {
+        val snapshot = state.value
+        val question = snapshot.questions.firstOrNull { it.id == snapshot.selectedQuestionId } ?: return
+        if (question.id in snapshot.hintsLoading || question.id in snapshot.hints) return
+        // Include the sentence so an edited/restored question cannot reuse unrelated hints.
+        val cacheKey = "${question.id}_${question.english}_${question.level}_${question.focus}"
+        val cached = runCatching {
+            val obj = JSONObject(hintCache.getString(cacheKey, null) ?: return@runCatching null)
+            val arr = obj.getJSONArray("words")
+            QuestionHints((0 until arr.length()).map { arr.getString(it) }, obj.getString("grammar"))
+        }.getOrNull()
+        if (cached != null) {
+            local.update { it.copy(hints = it.hints + (question.id to cached)) }
+            return
+        }
+        local.update { it.copy(hintsLoading = it.hintsLoading + question.id, hintErrors = it.hintErrors - question.id) }
+        viewModelScope.launch {
+            try {
+                val result = ai.hints(question, snapshot.selectedModel)
+                hintCache.edit().putString(cacheKey, JSONObject()
+                    .put("words", JSONArray(result.words)).put("grammar", result.grammar).toString()).apply()
+                local.update { it.copy(hints = it.hints + (question.id to result)) }
+            } catch (e: Exception) {
+                local.update { it.copy(hintErrors = it.hintErrors + (question.id to (e.message ?: "Could not load hints. Try again."))) }
+            } finally {
+                local.update { it.copy(hintsLoading = it.hintsLoading - question.id) }
             }
         }
     }

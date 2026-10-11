@@ -30,7 +30,7 @@ Grading, quiz-generation and explanation failures now open a readable popup with
 
 ## Speaking trainer
 
-**Speak German** still uses the phone's speech recognition and allows editing before text grading.
+**Voice typing** still uses the phone's speech recognition and allows editing before text grading.
 For uninterrupted practice, select a Gemini model and configure its key in Settings, then choose
 **Record answer** inside a question. Allow microphone permission, speak at your own pace, and tap
 **Stop recording**. Pauses do not end the recording. Recordings are limited to five minutes and
@@ -58,6 +58,15 @@ tools, and tapping a History entry reveals its saved correction, feedback and pr
 Draft answers are isolated by learner as well as question.
 
 Run reliability checks with `gradle :app:testDebugUnitTest :app:assembleDebug :app:lintDebug`.
+
+## Question layout and hints
+
+The question stays visible above the scrollable answer area. A full-width microphone/Stop
+button sits directly below it; Google voice typing has its own button beside the typing tools.
+**Show word hints** requests useful German vocabulary (including articles and relevant verb
+forms) and a short grammar tip without revealing the complete answer. Hints use the selected
+Gemini or DeepSeek text model and are cached privately on the phone for offline reuse.
+Hint errors stay inline and can be retried without interrupting a recording.
 
 ## App icon
 The project includes a custom DeutschTrainer launcher icon inspired by an open book and the German black/red/gold palette.
