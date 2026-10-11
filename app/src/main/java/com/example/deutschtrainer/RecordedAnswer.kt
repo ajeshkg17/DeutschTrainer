@@ -25,6 +25,7 @@ import java.io.File
 fun RecordedAnswer(
     enabled: Boolean,
     loading: Boolean,
+    serverError: String? = null,
     onBusy: (Boolean) -> Unit,
     onGrade: (File) -> Unit
 ) {
@@ -180,6 +181,7 @@ fun RecordedAnswer(
                 Text("Only this button sends your audio to Gemini. Audio is temporary; the transcript and feedback are saved in history.", style = MaterialTheme.typography.bodySmall)
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            serverError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         }
     }
 }

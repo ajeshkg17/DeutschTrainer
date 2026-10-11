@@ -4,7 +4,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
 import java.net.URL
 import java.io.File
 import android.util.Base64
@@ -27,6 +26,7 @@ data class GeneratedQuestion(
 )
 
 class GeminiService(private val keyStore: ApiKeyStore) {
+    private val http = AiHttpClient()
 
     suspend fun evaluateRecording(english: String, level: String, audio: File, model: AiModel): Evaluation = withContext(Dispatchers.IO) {
         require(model.provider == AiProvider.GEMINI) { "Select a Gemini model in Settings for speaking feedback." }
@@ -201,7 +201,7 @@ Use clear English for explanations and German for examples. Be concise enough fo
     private fun geminiRequest(prompt: String, model: AiModel, audio: File? = null): String {
         val key = keyStore.geminiKey()
         check(key.isNotBlank()) { "Add your Gemini API key in Settings before continuing." }
-        val url = URL("https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=$key")
+        val url = URL("https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent")
         val parts = JSONArray().put(JSONObject().put("text", prompt))
         if (audio != null) {
             parts.put(JSONObject().put("inline_data", JSONObject()
@@ -213,7 +213,8 @@ Use clear English for explanations and German for examples. Be concise enough fo
             JSONArray().put(JSONObject().put("parts", parts))
         )
         if (audio != null) body.put("generationConfig", JSONObject().put("responseMimeType", "application/json"))
-        return httpPost(url, body, mapOf("Content-Type" to "application/json")) { root ->
+        return httpPost(url, body, mapOf("Content-Type" to "application/json", "x-goog-api-key" to key),
+            readTimeoutMs = if (audio != null) 120_000 else 60_000) { root ->
             val responseParts = root.optJSONArray("candidates")
                 ?.optJSONObject(0)
                 ?.optJSONObject("content")
@@ -251,25 +252,10 @@ Use clear English for explanations and German for examples. Be concise enough fo
         url: URL,
         json: JSONObject,
         headers: Map<String, String>,
+        readTimeoutMs: Int = 60_000,
         parse: (JSONObject) -> String
     ): String {
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 30_000
-            readTimeout = 60_000
-            doOutput = true
-            headers.forEach { (k, v) -> setRequestProperty(k, v) }
-        }
-        try {
-            connection.outputStream.bufferedWriter().use { it.write(json.toString()) }
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) error("AI request failed ($code): ${text.take(500)}")
-            return parse(JSONObject(text))
-        } finally {
-            connection.disconnect()
-        }
+        return parse(JSONObject(http.post(url, json.toString(), headers, readTimeoutMs)))
     }
 
     private fun cleanJson(text: String): String {

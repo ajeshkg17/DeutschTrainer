@@ -22,6 +22,7 @@ data class UiState(
     val explanation: String? = null,
     val loading: Boolean = false,
     val message: String? = null,
+    val recordingError: String? = null,
     val selectedModel: AiModel = AiModels.default,
     val geminiKeyConfigured: Boolean = false,
     val deepSeekKeyConfigured: Boolean = false
@@ -236,7 +237,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         state.value.selectedQuizSetId?.let { quizId ->
             prefs.edit().putLong(selectedQuestionKey(quizId), id).apply()
         }
-        local.update { it.copy(selectedQuestionId = id, evaluation = null, explanation = null, message = null) }
+        local.update { it.copy(selectedQuestionId = id, evaluation = null, explanation = null, message = null, recordingError = null) }
     }
 
     fun nextQuestion() {
@@ -317,7 +318,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         }
 
         viewModelScope.launch {
-            local.update { it.copy(loading = true, message = null, explanation = null, evaluation = null) }
+            local.update { it.copy(loading = true, message = null, explanation = null, evaluation = null, recordingError = null) }
             try {
                 val evaluation = if (audio == null) {
                     ai.evaluate(question.english, answer.trim(), question.level, snapshot.selectedModel)
@@ -340,8 +341,9 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 local.update { it.copy(loading = false, evaluation = evaluation) }
             } catch (e: Exception) {
-                local.update { it.copy(loading = false, message = e.message ?: "Grading failed") }
-                AiErrorDialogActivity.show(getApplication(), "grading your answer", e)
+                val message = e.message ?: "Grading failed. Please try again."
+                local.update { it.copy(loading = false, message = message, recordingError = if (audio != null) message else null) }
+                if (audio == null) AiErrorDialogActivity.show(getApplication(), "grading your answer", e)
             } finally {
                 audio?.delete()
             }

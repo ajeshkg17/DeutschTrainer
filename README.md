@@ -46,6 +46,16 @@ in temporary app storage until the question is closed or the recording is replac
 audio is not included in history or backups. If an AI request fails, the recording remains available
 on the question screen for playback and retry.
 
+Temporary AI server failures are retried twice. Recorded-answer errors stay beside the recording
+controls so you can retry without losing the audio. Longer audio requests have a two-minute
+response timeout. API keys are sent in authentication headers.
+
+Next opens directly to learner selection. **More → Backup & restore** opens the portable backup
+tools, and tapping a History entry reveals its saved correction, feedback and practice advice.
+Draft answers are isolated by learner as well as question.
+
+Run reliability checks with `gradle :app:testDebugUnitTest :app:assembleDebug :app:lintDebug`.
+
 ## App icon
 The project includes a custom DeutschTrainer launcher icon inspired by an open book and the German black/red/gold palette.
 

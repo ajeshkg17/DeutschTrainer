@@ -138,14 +138,16 @@ private fun V2App(
 ) {
     val state by vm.state.collectAsState()
     var screen by rememberSaveable { mutableStateOf(V2Screen.PROFILE) }
-    val answers = remember { mutableStateMapOf<Long, String>() }
+    val answers = remember { mutableStateMapOf<String, String>() }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val draftPrefs = remember { context.getSharedPreferences("answer_drafts", Context.MODE_PRIVATE) }
+    val activeDraftKey = "${state.selectedProfileId ?: 0L}_${state.selectedQuestionId ?: 0L}"
 
     LaunchedEffect(state.evaluation) {
         state.evaluation?.transcript?.let { transcript ->
             state.selectedQuestionId?.let { id ->
-                answers[id] = transcript
-                context.getSharedPreferences("answer_drafts", Context.MODE_PRIVATE).edit()
+                answers["${state.selectedProfileId ?: 0L}_$id"] = transcript
+                draftPrefs.edit()
                     .putString("${state.selectedProfileId ?: 0L}_$id", transcript).apply()
             }
         }
@@ -208,7 +210,8 @@ private fun V2App(
 
                 V2Screen.RESULT -> V2ResultScreen(
                     state = state,
-                    answer = state.evaluation?.transcript ?: state.selectedQuestionId?.let { answers[it] }.orEmpty(),
+                    answer = state.evaluation?.transcript ?: answers[activeDraftKey]
+                        ?: draftPrefs.getString(activeDraftKey, "").orEmpty(),
                     onEdit = { screen = V2Screen.QUESTION },
                     onNext = { vm.nextQuestion(); screen = V2Screen.QUESTION },
                     onExplain = vm::explainLast
@@ -618,7 +621,7 @@ private fun V2CreateScreen(state: UiState, vm: QuizViewModel, onQuizzes: () -> U
 @Composable
 private fun V2QuestionScreen(
     state: UiState,
-    answers: MutableMap<Long, String>,
+    answers: MutableMap<String, String>,
     onBack: () -> Unit,
     onHome: () -> Unit,
     onPrevious: () -> Unit,
@@ -638,7 +641,7 @@ private fun V2QuestionScreen(
     val profileId = state.selectedProfileId ?: 0L
     val draftKey = "${profileId}_${question.id}"
     val stored = remember(question.id, profileId) { drafts.getString(draftKey, "").orEmpty() }
-    val answer = answers[question.id] ?: stored
+    val answer = answers[draftKey] ?: stored
     val index = session.indexOfFirst { it.id == question.id }.coerceAtLeast(0)
     val quiz = state.quizSets.firstOrNull { it.id == state.selectedQuizSetId }
     var speechError by remember { mutableStateOf<String?>(null) }
@@ -649,7 +652,7 @@ private fun V2QuestionScreen(
 
 
     fun setAnswer(value: String) {
-        answers[question.id] = value
+        answers[draftKey] = value
         drafts.edit().putString(draftKey, value).apply()
     }
 
@@ -759,6 +762,7 @@ private fun V2QuestionScreen(
             RecordedAnswer(
                 enabled = state.selectedModel.provider == AiProvider.GEMINI && state.geminiKeyConfigured,
                 loading = state.loading,
+                serverError = state.recordingError,
                 onBusy = { recordingBusy = it },
                 onGrade = onGradeRecording
             )
@@ -1002,6 +1006,7 @@ private fun V2ProgressScreen(state: UiState) {
 
 @Composable
 private fun V2HistoryScreen(state: UiState, onBack: () -> Unit) {
+    var expandedAttempt by rememberSaveable { mutableLongStateOf(-1L) }
     var filter by rememberSaveable { mutableStateOf("All") }
     val fmt = remember { SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()) }
     val shown = when (filter) {
@@ -1019,14 +1024,36 @@ private fun V2HistoryScreen(state: UiState, onBack: () -> Unit) {
             V2Info("Nothing here yet", "Your graded translations will appear here.")
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-                items(shown) { item ->
-                    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                items(shown, key = { it.attempt.id }) { item ->
+                    val expanded = expandedAttempt == item.attempt.id
+                    Card(
+                        onClick = { expandedAttempt = if (expanded) -1L else item.attempt.id },
+                        shape = RoundedCornerShape(22.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
                         Row(Modifier.padding(14.dp), horizontalArrangement = Arrangement.spacedBy(13.dp)) {
                             V2ScoreBadge(item.attempt.score)
                             Column(Modifier.weight(1f)) {
                                 Text(item.question.english, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text(item.attempt.answer, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
                                 Text("${item.question.level} · ${item.question.focus} · ${fmt.format(Date(item.attempt.createdAt))}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 7.dp))
+                                Text(if (expanded) "Hide feedback" else "Tap to review feedback", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 6.dp))
+                            }
+                        }
+                        if (expanded) {
+                            Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Suggested correction", fontWeight = FontWeight.Bold)
+                                Text(item.attempt.correctedTranslation)
+                                Text("Feedback", fontWeight = FontWeight.Bold)
+                                Text(item.attempt.shortFeedback)
+                                v2StringList(item.attempt.mistakesJson).forEach {
+                                    V2FeedbackBox(it, MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.error)
+                                }
+                                val practice = v2StringList(item.attempt.improveJson)
+                                if (practice.isNotEmpty()) {
+                                    Text("Practice next", fontWeight = FontWeight.Bold)
+                                    practice.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+                                }
                             }
                         }
                     }
@@ -1038,6 +1065,7 @@ private fun V2HistoryScreen(state: UiState, onBack: () -> Unit) {
 
 @Composable
 private fun V2MoreScreen(state: UiState, onHistory: () -> Unit, onSettings: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val profile = state.profiles.firstOrNull { it.id == state.selectedProfileId }
     Column(Modifier.fillMaxSize().padding(18.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1049,6 +1077,10 @@ private fun V2MoreScreen(state: UiState, onHistory: () -> Unit, onSettings: () -
             V2Action(Icons.Outlined.History, "History", "Review answers and corrections", onHistory)
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             V2Action(Icons.Outlined.Settings, "Settings", "Profiles, AI model, theme and data", onSettings)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            V2Action(Icons.Outlined.Backup, "Backup & restore", "Save or restore a learner profile") {
+                context.startActivity(Intent(context, BackupRestoreActivity::class.java))
+            }
         }
     }
 }
@@ -1291,6 +1323,11 @@ private fun V2ScoreBadge(score: Int) {
 private fun v2QuizIds(json: String): List<Long> = runCatching {
     val array = JSONArray(json)
     List(array.length()) { index -> array.optLong(index) }.filter { it > 0L }
+}.getOrDefault(emptyList())
+
+private fun v2StringList(json: String): List<String> = runCatching {
+    val array = JSONArray(json)
+    List(array.length()) { array.optString(it) }.filter { it.isNotBlank() }
 }.getOrDefault(emptyList())
 
 private fun v2GrammarAverages(attempts: List<AttemptWithQuestion>): List<Pair<String, Double>> {
