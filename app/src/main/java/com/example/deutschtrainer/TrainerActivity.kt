@@ -848,6 +848,13 @@ private fun V2ResultScreen(
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
+                if (evaluation.transcript != null) {
+                    Text("Translation score", style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.align(Alignment.CenterHorizontally))
+                    Spacer(Modifier.height(10.dp))
+                    Text("What AI heard", fontWeight = FontWeight.Bold)
+                    Text(evaluation.transcript, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp))
+                }
                 Text(
                     evaluation.shortFeedback,
                     modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp),

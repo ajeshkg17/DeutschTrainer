@@ -37,25 +37,26 @@ English sentence to translate: $english
 Target CEFR level: $level
 Transcribe the German exactly as spoken, including mistakes. Do not substitute a correct translation.
 If there is no intelligible German speech, return an empty transcript and explain that a new recording is needed.
-Grade translation meaning, grammar and naturalness from 1 to 10; do not punish valid alternatives.
-In short_feedback include separately labelled Pronunciation and Fluency feedback based ONLY on audible evidence:
+Give pronunciation_feedback and fluency_feedback based ONLY on audible evidence:
 German sounds, word stress, rhythm, pauses, hesitations and intelligibility. Quote specific words or timestamps
-when possible, and give concrete practice advice in how_to_improve. Do not infer pronunciation from spelling
-or penalize accent alone. If noise or a short sample prevents assessment, say so. Scores are practice estimates.
-Keep grammar mistakes in mistakes and grammar_topics; keep speaking advice in how_to_improve.
-Return ONLY valid JSON with score (integer), transcript (string), corrected_translation (string),
-short_feedback (string), mistakes (string array), how_to_improve (string array), grammar_topics (string array).
+when possible, and give concrete practice advice in speaking_practice. Do not infer pronunciation from spelling
+or penalize accent alone. If noise or a short sample prevents assessment, say so.
+Do not grade the translation, grammar, or vocabulary: a separate text examiner will do that.
+Return ONLY valid JSON with transcript (string), pronunciation_feedback (string),
+fluency_feedback (string), speaking_practice (string array).
 """.trimIndent()
         val obj = JSONObject(cleanJson(geminiRequest(prompt, model, audio)))
         val transcript = obj.optString("transcript").trim()
         check(transcript.isNotBlank()) { "No intelligible German speech was detected. Listen to your recording and try again." }
-        Evaluation(
-            score = obj.optInt("score", 1).coerceIn(1, 10),
-            correctedTranslation = obj.optString("corrected_translation"),
-            shortFeedback = obj.optString("short_feedback"),
-            mistakes = obj.optJSONArray("mistakes")?.toStringList().orEmpty(),
-            howToImprove = obj.optJSONArray("how_to_improve")?.toStringList().orEmpty(),
-            grammarTopics = obj.optJSONArray("grammar_topics")?.toStringList().orEmpty(),
+        // Assess the transcript without audio so accent and pauses cannot bias grammar scoring.
+        val translation = evaluate(english, transcript, level, model)
+        translation.copy(
+            shortFeedback = listOf(
+                translation.shortFeedback,
+                "Pronunciation: ${obj.optString("pronunciation_feedback", "This sample could not be assessed.")}",
+                "Fluency: ${obj.optString("fluency_feedback", "This sample could not be assessed.")}"
+            ).joinToString("\n\n"),
+            howToImprove = (translation.howToImprove + obj.optJSONArray("speaking_practice")?.toStringList().orEmpty()).distinct(),
             transcript = transcript
         )
     }

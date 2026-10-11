@@ -39,7 +39,9 @@ choosing **Check recorded answer**.
 
 That button sends the original audio to Gemini, which transcribes the German and evaluates the
 translation plus audible pronunciation and fluency. Feedback includes specific speaking practice
-advice where the audio permits it; these are practice estimates, not certified speaking scores.
+advice. The transcript is shown under **What AI heard**. Its translation score uses the same text
+grading rubric as typed answers, in a separate request so speaking pace and accent do not affect it.
+Speaking feedback is limited to what the audio permits; these are practice estimates, not certified speaking scores.
 DeepSeek remains available for text grading. Recorded-answer assessment requires Gemini.
 The transcript and feedback are saved in the existing history and portable backups. Audio stays
 in temporary app storage until successfully checked or replaced/discarded. Unfinished recordings
