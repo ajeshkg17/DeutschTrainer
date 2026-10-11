@@ -39,7 +39,7 @@ fun RecordedAnswer(
     var seconds by remember { mutableIntStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     val currentBusy by rememberUpdatedState(onBusy)
-    val currentEnabled by rememberUpdatedState(enabled && !loading)
+    val currentEnabled by rememberUpdatedState(!loading)
 
     fun stopPlayback() {
         player?.release()
@@ -136,13 +136,13 @@ fun RecordedAnswer(
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Speaking trainer", style = MaterialTheme.typography.titleMedium)
             Text("Record at your own pace, including pauses (up to 5 minutes). Stop, listen, then send to Gemini for pronunciation and fluency feedback.", style = MaterialTheme.typography.bodySmall)
-            if (!enabled) Text("Choose a Gemini model and add its API key in Settings to use recorded answers.", style = MaterialTheme.typography.bodySmall)
+            if (!enabled) Text("You can record and listen offline. Choose a Gemini model and add its API key in Settings for AI speaking feedback.", style = MaterialTheme.typography.bodySmall)
             if (recording) Text("Recording • %d:%02d".format(seconds / 60, seconds % 60))
             Button(onClick = {
                 if (recording) stopRecording()
                 else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startRecording()
                 else permission.launch(Manifest.permission.RECORD_AUDIO)
-            }, enabled = recording || (enabled && !loading)) {
+            }, enabled = recording || !loading) {
                 Text(if (recording) "Stop recording" else if (file == null) "Record answer" else "Record again")
             }
             if (file != null && !recording) {
