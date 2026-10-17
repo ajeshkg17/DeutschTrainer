@@ -20,8 +20,16 @@ data class QuestionEntity(
     val level: String,
     val topic: String,
     val focus: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(defaultValue = "'[]'") val choicesJson: String = "[]",
+    @ColumnInfo(defaultValue = "-1") val correctChoiceIndex: Int = -1,
+    @ColumnInfo(defaultValue = "''") val answerExplanation: String = ""
 )
+
+fun QuestionEntity.multipleChoice(): MultipleChoice {
+    val choices = org.json.JSONArray(choicesJson)
+    return MultipleChoice(List(choices.length()) { choices.getString(it) }, correctChoiceIndex, answerExplanation)
+}
 
 @Entity(
     tableName = "quiz_sets",
@@ -135,7 +143,7 @@ interface QuizDao {
 
 @Database(
     entities = [ProfileEntity::class, QuestionEntity::class, AttemptEntity::class, QuizSetEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -182,12 +190,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `questions` ADD COLUMN `choicesJson` TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE `questions` ADD COLUMN `correctChoiceIndex` INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("ALTER TABLE `questions` ADD COLUMN `answerExplanation` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 "deutsch_trainer.db"
-            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 .also { INSTANCE = it }
         }

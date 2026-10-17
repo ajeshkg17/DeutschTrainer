@@ -70,15 +70,7 @@ class ProfileBackupManager(private val context: Context) {
                 "questions",
                 JSONArray().apply {
                     questions.forEach { q ->
-                        put(
-                            JSONObject()
-                                .put("id", q.id)
-                                .put("english", q.english)
-                                .put("level", q.level)
-                                .put("topic", q.topic)
-                                .put("focus", q.focus)
-                                .put("createdAt", q.createdAt)
-                        )
+                        put(QuestionBackupJson.write(q))
                     }
                 }
             )
@@ -173,15 +165,8 @@ class ProfileBackupManager(private val context: Context) {
             for (i in 0 until questionObjects.length()) {
                 val q = questionObjects.getJSONObject(i)
                 val oldId = q.getLong("id")
-                val newId = dao.insertQuestion(
-                    QuestionEntity(
-                        english = q.optString("english"),
-                        level = q.optString("level", "B1"),
-                        topic = q.optString("topic", "Imported"),
-                        focus = q.optString("focus", "Mixed"),
-                        createdAt = q.optLong("createdAt", System.currentTimeMillis())
-                    )
-                )
+                val question = QuestionBackupJson.read(q)
+                val newId = dao.insertQuestion(question)
                 questionMap[oldId] = newId
             }
 
@@ -216,7 +201,7 @@ class ProfileBackupManager(private val context: Context) {
                         profileId = newProfileId,
                         quizSetId = oldQuizId?.let { quizMap[it] },
                         answer = a.optString("answer"),
-                        score = a.optInt("score", 1).coerceIn(1, 10),
+                        score = a.optInt("score", 1).coerceIn(0, 10),
                         correctedTranslation = a.optString("correctedTranslation"),
                         shortFeedback = a.optString("shortFeedback"),
                         mistakesJson = a.optString("mistakesJson", "[]"),
@@ -264,6 +249,6 @@ class ProfileBackupManager(private val context: Context) {
 
     companion object {
         const val FORMAT_NAME = "deutschtrainer-profile-backup"
-        const val FORMAT_VERSION = 1
+        const val FORMAT_VERSION = 2
     }
 }

@@ -22,7 +22,8 @@ data class GeneratedQuestion(
     val english: String,
     val level: String,
     val topic: String,
-    val focus: String
+    val focus: String,
+    val multipleChoice: MultipleChoice? = null
 )
 
 data class QuestionHints(val words: List<String>, val grammar: String)
@@ -124,7 +125,21 @@ Return ONLY valid JSON in this exact structure:
         )
     }
 
-    suspend fun generateQuestions(count: Int, level: String, topic: String, focus: String, model: AiModel): List<GeneratedQuestion> {
+    suspend fun generateQuestions(count: Int, level: String, topic: String, focus: String, model: AiModel, mcq: Boolean = false): List<GeneratedQuestion> {
+        val answerInstructions = if (mcq) """
+For each English sentence, provide four German translation options in an "options" string array.
+Exactly ONE option must be a fully correct, natural translation; the other three must have clear
+grammar or meaning errors, not merely acceptable alternative wording. Match the requested level.
+Vary the position of the correct answer across the set. Include "correct_index" (integer 0 to 3)
+and "explanation" (concise English explanation of why the correct translation works and what is
+wrong with the distractors). Check the answer key carefully. Do not label the answer in option text.
+In explanations refer to the German text, not option letters or numbers.
+""".trimIndent() else "Do not give German answers, translations, hints or explanations."
+        val answerFields = if (mcq) """,
+      "options": ["German option", "German option", "German option", "German option"],
+      "correct_index": 0,
+      "explanation": "Why the correct translation works and why the others are wrong"
+""".trimEnd() else ""
         val prompt = """
 Create exactly $count English-to-German translation practice questions.
 
@@ -141,7 +156,7 @@ Learning-design requirements:
 - Vary sentence length, tense, clause structure, subject, vocabulary and communicative situation.
 - Include a realistic mixture of statements, requests, questions, reasons, conditions and time relationships where suitable.
 - Do not produce duplicate or near-duplicate sentences inside the set.
-- Do not give German answers, translations, hints or explanations.
+- $answerInstructions
 - Avoid trick questions and unnecessarily obscure vocabulary.
 - Make the set useful for repeated real-world practice rather than a list of tiny variations of one sentence.
 
@@ -152,25 +167,34 @@ Return ONLY valid JSON:
       "english": "...",
       "level": "$level",
       "topic": "$topic",
-      "focus": "$focus"
+      "focus": "$focus"$answerFields
     }
   ]
 }
 """.trimIndent()
         val arr = JSONObject(cleanJson(generate(prompt, model))).getJSONArray("questions")
-        return buildList {
+        val questions = buildList {
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
+                require(o.getString("english").isNotBlank()) { "The AI returned an empty question. Please generate again." }
                 add(
                     GeneratedQuestion(
                         english = o.getString("english"),
                         level = o.optString("level", level),
                         topic = o.optString("topic", topic),
-                        focus = o.optString("focus", focus)
+                        focus = o.optString("focus", focus),
+                        multipleChoice = if (mcq) {
+                            val options = o.getJSONArray("options")
+                            val index = o.get("correct_index")
+                            require(index is Number && index.toDouble() == index.toInt().toDouble()) { "Invalid MCQ answer key. Try generating again." }
+                            MultipleChoice(List(options.length()) { options.getString(it).trim() }, index.toInt(), o.getString("explanation").trim())
+                        } else null
                     )
                 )
             }
         }.distinctBy { it.english.trim().lowercase() }.take(count)
+        require(questions.size == count) { "The AI returned an incomplete quiz. Please generate again." }
+        return questions
     }
 
     suspend fun explain(

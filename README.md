@@ -68,7 +68,25 @@ forms) and a short grammar tip without revealing the complete answer. Hints use 
 Gemini or DeepSeek text model and are cached privately on the phone for offline reuse.
 Hint errors stay inline and can be retried without interrupting a recording.
 
+## Multiple-choice quizzes
+
+In **Create**, choose **Multiple choice** under **Question type**, then set the topic,
+grammar focus, level and number of questions. Generation uses the selected Gemini or
+DeepSeek model. Each English sentence has four German translations and one correct answer.
+Tap an option, then **Check answer** to see the correct translation and a saved explanation.
+Checking works offline after generation: a correct choice scores 10/10 and an incorrect one
+0/10. Attempts appear in progress/history and incorrect answers can be used in mistake review.
+Choices are remembered separately for each learner and question.
+
+Generated sets are validated before saving and saved in one transaction, so malformed or
+incomplete output cannot leave a partial quiz. Validation checks answer count, distinct
+non-empty options, the answer-key range and the presence of an explanation; the AI supplies
+the linguistic answer key. MCQ choices, answer keys and explanations are included in version 2
+portable backups. This app also accepts version 1 translation-only backups. Room migration
+4 → 5 adds the MCQ fields while preserving existing questions, quizzes and attempts.
+
 ## App icon
+
 The project includes a custom DeutschTrainer launcher icon inspired by an open book and the German black/red/gold palette.
 
 ## API keys

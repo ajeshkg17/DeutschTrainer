@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.json.JSONArray
@@ -325,7 +326,11 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             local.update { it.copy(loading = true, message = null, explanation = null, evaluation = null, recordingError = null) }
             try {
-                val evaluation = if (audio == null) {
+                val evaluation = if (question.correctChoiceIndex >= 0) {
+                    check(audio == null) { "Choose an answer for this multiple-choice question." }
+                    val mcq = question.multipleChoice()
+                    mcq.evaluate(mcq.options.indexOf(answer)).copy(grammarTopics = listOf(question.focus))
+                } else if (audio == null) {
                     ai.evaluate(question.english, answer.trim(), question.level, snapshot.selectedModel)
                 } else {
                     ai.evaluateRecording(question.english, question.level, audio, snapshot.selectedModel)
@@ -361,41 +366,49 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         level: String,
         topic: String,
         focus: String,
-        title: String = ""
+        title: String = "",
+        mcq: Boolean = false
     ) {
         val snapshot = state.value
+        if (snapshot.loading) return
         val model = snapshot.selectedModel
         val pid = snapshot.selectedProfileId ?: return
         val safeTopic = topic.trim().ifBlank { "General German" }
         val safeFocus = focus.trim().ifBlank { "Mixed grammar" }
-        val safeTitle = title.trim().ifBlank { safeTopic }
+        val safeTitle = title.trim().ifBlank { if (mcq) "$safeTopic · MCQ" else safeTopic }
 
         viewModelScope.launch {
             local.update { it.copy(loading = true, message = null) }
             try {
-                val generated = ai.generateQuestions(count, level, safeTopic, safeFocus, model)
-                val ids = mutableListOf<Long>()
-                for (question in generated) {
-                    ids += dao.insertQuestion(
-                        QuestionEntity(
-                            english = question.english,
-                            level = question.level,
-                            topic = question.topic,
-                            focus = question.focus
+                val generated = ai.generateQuestions(count, level, safeTopic, safeFocus, model, mcq)
+                val (setId, ids) = AppDatabase.get(getApplication()).withTransaction {
+                    val ids = mutableListOf<Long>()
+                    for (question in generated) {
+                        ids += dao.insertQuestion(
+                            QuestionEntity(
+                                english = question.english,
+                                level = question.level,
+                                topic = question.topic,
+                                focus = question.focus,
+                                choicesJson = JSONArray(question.multipleChoice?.options.orEmpty()).toString(),
+                                correctChoiceIndex = question.multipleChoice?.correctIndex ?: -1,
+                                answerExplanation = question.multipleChoice?.explanation.orEmpty()
+                            )
+                        )
+                    }
+
+                    val setId = dao.insertQuizSet(
+                        QuizSetEntity(
+                            profileId = pid,
+                            title = safeTitle,
+                            level = level,
+                            topic = safeTopic,
+                            focus = safeFocus,
+                            questionIdsJson = JSONArray(ids).toString()
                         )
                     )
+                    setId to ids
                 }
-
-                val setId = dao.insertQuizSet(
-                    QuizSetEntity(
-                        profileId = pid,
-                        title = safeTitle,
-                        level = level,
-                        topic = safeTopic,
-                        focus = safeFocus,
-                        questionIdsJson = JSONArray(ids).toString()
-                    )
-                )
                 val editor = prefs.edit().putLong(selectedQuizKey(pid), setId)
                 ids.firstOrNull()?.let { editor.putLong(selectedQuestionKey(setId), it) }
                 editor.apply()

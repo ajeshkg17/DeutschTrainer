@@ -14,6 +14,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,6 +31,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -569,6 +572,7 @@ private fun V2CreateScreen(state: UiState, vm: QuizViewModel, onQuizzes: () -> U
     var topic by rememberSaveable { mutableStateOf("") }
     var focus by rememberSaveable { mutableStateOf("Mixed grammar") }
     var count by rememberSaveable { mutableIntStateOf(10) }
+    var quizType by rememberSaveable { mutableStateOf("Translation") }
 
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 18.dp),
@@ -585,6 +589,12 @@ private fun V2CreateScreen(state: UiState, vm: QuizViewModel, onQuizzes: () -> U
         item { V2LabeledField("Quiz title (optional)", title, { title = it }, "e.g. Work emails") }
         item { V2LabeledField("Topic", topic, { topic = it }, "Type any topic: dentist, lab, shopping, travel…") }
         item { V2LabeledField("Grammar focus", focus, { focus = it }, "Mixed, word order, cases, Konjunktiv II…") }
+        item { Text("Question type", fontWeight = FontWeight.Bold) }
+        item { V2ChoiceChips(listOf("Translation", "Multiple choice"), quizType) { quizType = it } }
+        if (quizType == "Multiple choice") {
+            item { Text("Choose from four German answers. Get instant feedback and an explanation, even offline after generation.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
         item { Text("CEFR level", fontWeight = FontWeight.Bold) }
         item { V2ChoiceChips(listOf("A2", "B1", "B2", "C1"), level) { level = it } }
         item { Text("Number of questions", fontWeight = FontWeight.Bold) }
@@ -605,7 +615,7 @@ private fun V2CreateScreen(state: UiState, vm: QuizViewModel, onQuizzes: () -> U
         }
         item {
             Button(
-                onClick = { vm.generate(count, level, topic, focus, title) },
+                onClick = { vm.generate(count, level, topic, focus, title, mcq = quizType == "Multiple choice") },
                 enabled = topic.isNotBlank() && !state.loading,
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(16.dp)
@@ -635,6 +645,11 @@ private fun V2QuestionScreen(
     val question = session.firstOrNull { it.id == state.selectedQuestionId } ?: session.firstOrNull()
     if (question == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("This quiz has no questions.") }
+        return
+    }
+
+    if (question.correctChoiceIndex >= 0) {
+        V2MultipleChoiceScreen(state, question, answers, onBack, onHome, onPrevious, onNext, onGrade)
         return
     }
 
@@ -827,6 +842,88 @@ private fun V2QuestionScreen(
 }
 
 @Composable
+private fun V2MultipleChoiceScreen(
+    state: UiState,
+    question: QuestionEntity,
+    answers: MutableMap<String, String>,
+    onBack: () -> Unit,
+    onHome: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onGrade: (String) -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val drafts = remember { context.getSharedPreferences("answer_drafts", Context.MODE_PRIVATE) }
+    val draftKey = "${state.selectedProfileId ?: 0L}_${question.id}"
+    val stored = remember(draftKey) { drafts.getString(draftKey, "").orEmpty() }
+    val selected = answers[draftKey] ?: stored
+    val mcq = remember(question) { runCatching { question.multipleChoice() }.getOrNull() }
+    val index = state.questions.indexOfFirst { it.id == question.id }.coerceAtLeast(0)
+    BackHandler(enabled = state.loading) { }
+
+    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 10.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            FilledTonalIconButton(onClick = onBack, enabled = !state.loading) {
+                Icon(Icons.Outlined.ArrowBack, contentDescription = "Back to quizzes")
+            }
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("QUESTION ${index + 1} OF ${state.questions.size}", style = MaterialTheme.typography.labelSmall)
+                Text("Multiple choice", fontWeight = FontWeight.Bold)
+            }
+            FilledTonalIconButton(onClick = onHome, enabled = !state.loading) {
+                Icon(Icons.Outlined.Home, contentDescription = "Home")
+            }
+        }
+        LinearProgressIndicator(progress = { (index + 1).toFloat() / state.questions.size },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp).height(7.dp).clip(CircleShape))
+        Card(shape = RoundedCornerShape(24.dp)) {
+            Column(Modifier.heightIn(max = 230.dp).verticalScroll(rememberScrollState()).padding(16.dp)) {
+                V2Badge("English → German")
+                Text(question.english, modifier = Modifier.padding(top = 10.dp),
+                    style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            }
+        }
+        val scroll = key(draftKey) { rememberScrollState() }
+        Column(Modifier.weight(1f).verticalScroll(scroll).selectableGroup(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Choose the best German translation", modifier = Modifier.padding(top = 14.dp), fontWeight = FontWeight.Bold)
+            if (mcq == null) {
+                V2InlineNotice("This question has an invalid answer key. Skip it and generate a new MCQ quiz.", error = true)
+            } else {
+                mcq.options.forEachIndexed { optionIndex, option ->
+                    val checked = selected == option
+                    OutlinedCard(
+                        modifier = Modifier.fillMaxWidth().selectable(selected = checked, enabled = !state.loading,
+                            role = Role.RadioButton, onClick = {
+                                answers[draftKey] = option
+                                drafts.edit().putString(draftKey, option).apply()
+                            }),
+                        colors = CardDefaults.outlinedCardColors(containerColor = if (checked)
+                            MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface),
+                        border = androidx.compose.foundation.BorderStroke(if (checked) 2.dp else 1.dp,
+                            if (checked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = checked, onClick = null, enabled = !state.loading)
+                            Text("${'A' + optionIndex}.", modifier = Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Bold)
+                            Text(option, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+            Text("Answers are checked offline. Correct = 10/10; incorrect = 0/10.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onPrevious, enabled = !state.loading, modifier = Modifier.weight(1f)) { Text("Back") }
+                Button(onClick = { onGrade(selected) }, enabled = !state.loading && mcq?.options?.contains(selected) == true,
+                    modifier = Modifier.weight(1.6f)) { Text(if (state.loading) "Checking…" else "Check answer") }
+            }
+            TextButton(onClick = onNext, enabled = !state.loading, modifier = Modifier.align(Alignment.End)) { Text("Skip to next") }
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
 private fun V2ResultScreen(
     state: UiState,
     answer: String,
@@ -838,6 +935,7 @@ private fun V2ResultScreen(
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
+    val isMcq = state.questions.firstOrNull { it.id == state.selectedQuestionId }?.correctChoiceIndex?.let { it >= 0 } == true
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -883,6 +981,10 @@ private fun V2ResultScreen(
                     Text("What AI heard", fontWeight = FontWeight.Bold)
                     Text(evaluation.transcript, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp))
                 }
+                if (isMcq) {
+                    Text("Your choice", fontWeight = FontWeight.Bold)
+                    Text(answer, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp))
+                }
                 Text(
                     evaluation.shortFeedback,
                     modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp),
@@ -892,7 +994,8 @@ private fun V2ResultScreen(
                 )
 
                 HorizontalDivider(Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                Text("A STRONG TRANSLATION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (isMcq)
+                    "CORRECT ANSWER" else "A STRONG TRANSLATION", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(evaluation.correctedTranslation, modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleMedium)
                 V2GermanTtsButton(evaluation.correctedTranslation)
 
