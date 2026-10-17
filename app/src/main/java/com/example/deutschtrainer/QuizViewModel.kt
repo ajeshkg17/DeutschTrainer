@@ -4,9 +4,12 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 
 
 data class UiState(
@@ -21,6 +24,10 @@ data class UiState(
     val explanation: String? = null,
     val loading: Boolean = false,
     val message: String? = null,
+    val recordingError: String? = null,
+    val hints: Map<Long, QuestionHints> = emptyMap(),
+    val hintsLoading: Set<Long> = emptySet(),
+    val hintErrors: Map<Long, String> = emptyMap(),
     val selectedModel: AiModel = AiModels.default,
     val geminiKeyConfigured: Boolean = false,
     val deepSeekKeyConfigured: Boolean = false
@@ -31,6 +38,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
     private val keyStore = ApiKeyStore(app)
     private val prefs = app.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
     private val ai = GeminiService(keyStore)
+    private val hintCache = app.getSharedPreferences("question_hints", Context.MODE_PRIVATE)
 
     private val local = MutableStateFlow(
         UiState(
@@ -235,7 +243,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         state.value.selectedQuizSetId?.let { quizId ->
             prefs.edit().putLong(selectedQuestionKey(quizId), id).apply()
         }
-        local.update { it.copy(selectedQuestionId = id, evaluation = null, explanation = null, message = null) }
+        local.update { it.copy(selectedQuestionId = id, evaluation = null, explanation = null, message = null, recordingError = null) }
     }
 
     fun nextQuestion() {
@@ -281,22 +289,58 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         local.update { it.copy(deepSeekKeyConfigured = false, message = "DeepSeek API key removed from this device.") }
     }
 
-    fun grade(answer: String) {
+    fun grade(answer: String) = gradeAnswer(answer, null)
+
+    fun gradeRecording(audio: File) {
+        if (state.value.loading) return
+        // The request owns its copy so rotation cannot delete audio being uploaded.
+        try {
+            val upload = File.createTempFile("speaking-upload-", ".m4a", getApplication<Application>().cacheDir)
+            try {
+                audio.copyTo(upload, overwrite = true)
+                gradeAnswer("", upload, audio)
+            } catch (e: Exception) {
+                upload.delete()
+                throw e
+            }
+        } catch (e: Exception) {
+            local.update { it.copy(message = "Could not read the recording. Please record again.") }
+            AiErrorDialogActivity.show(getApplication(), "reading your recording", e)
+        }
+    }
+
+    private fun gradeAnswer(answer: String, audio: File?, originalRecording: File? = null) {
         val snapshot = state.value
-        val question = snapshot.questions.firstOrNull { it.id == snapshot.selectedQuestionId } ?: return
-        val pid = snapshot.selectedProfileId ?: return
-        if (answer.isBlank()) return
+        val question = snapshot.questions.firstOrNull { it.id == snapshot.selectedQuestionId }
+        val pid = snapshot.selectedProfileId
+        if (question == null || pid == null || snapshot.loading || (audio == null && answer.isBlank())) {
+            audio?.delete()
+            return
+        }
+        if (audio != null && (snapshot.selectedModel.provider != AiProvider.GEMINI || !snapshot.geminiKeyConfigured)) {
+            local.update { it.copy(message = "Select a Gemini model and save a Gemini API key in Settings to check recorded answers.") }
+            audio.delete()
+            return
+        }
 
         viewModelScope.launch {
-            local.update { it.copy(loading = true, message = null, explanation = null) }
+            local.update { it.copy(loading = true, message = null, explanation = null, evaluation = null, recordingError = null) }
             try {
-                val evaluation = ai.evaluate(question.english, answer.trim(), question.level, snapshot.selectedModel)
+                val evaluation = if (question.correctChoiceIndex >= 0) {
+                    check(audio == null) { "Choose an answer for this multiple-choice question." }
+                    val mcq = question.multipleChoice()
+                    mcq.evaluate(mcq.options.indexOf(answer)).copy(grammarTopics = listOf(question.focus))
+                } else if (audio == null) {
+                    ai.evaluate(question.english, answer.trim(), question.level, snapshot.selectedModel)
+                } else {
+                    ai.evaluateRecording(question.english, question.level, audio, snapshot.selectedModel)
+                }
                 dao.insertAttempt(
                     AttemptEntity(
                         questionId = question.id,
                         profileId = pid,
                         quizSetId = snapshot.selectedQuizSetId,
-                        answer = answer.trim(),
+                        answer = evaluation.transcript ?: answer.trim(),
                         score = evaluation.score,
                         correctedTranslation = evaluation.correctedTranslation,
                         shortFeedback = evaluation.shortFeedback,
@@ -305,10 +349,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
                         grammarTopicsJson = JSONArray(evaluation.grammarTopics).toString()
                     )
                 )
+                originalRecording?.delete()
                 local.update { it.copy(loading = false, evaluation = evaluation) }
             } catch (e: Exception) {
-                local.update { it.copy(loading = false, message = e.message ?: "Grading failed") }
-                AiErrorDialogActivity.show(getApplication(), "grading your answer", e)
+                val message = e.message ?: "Grading failed. Please try again."
+                local.update { it.copy(loading = false, message = message, recordingError = if (audio != null) message else null) }
+                if (audio == null) AiErrorDialogActivity.show(getApplication(), "grading your answer", e)
+            } finally {
+                audio?.delete()
             }
         }
     }
@@ -318,41 +366,49 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
         level: String,
         topic: String,
         focus: String,
-        title: String = ""
+        title: String = "",
+        mcq: Boolean = false
     ) {
         val snapshot = state.value
+        if (snapshot.loading) return
         val model = snapshot.selectedModel
         val pid = snapshot.selectedProfileId ?: return
         val safeTopic = topic.trim().ifBlank { "General German" }
         val safeFocus = focus.trim().ifBlank { "Mixed grammar" }
-        val safeTitle = title.trim().ifBlank { safeTopic }
+        val safeTitle = title.trim().ifBlank { if (mcq) "$safeTopic · MCQ" else safeTopic }
 
         viewModelScope.launch {
             local.update { it.copy(loading = true, message = null) }
             try {
-                val generated = ai.generateQuestions(count, level, safeTopic, safeFocus, model)
-                val ids = mutableListOf<Long>()
-                for (question in generated) {
-                    ids += dao.insertQuestion(
-                        QuestionEntity(
-                            english = question.english,
-                            level = question.level,
-                            topic = question.topic,
-                            focus = question.focus
+                val generated = ai.generateQuestions(count, level, safeTopic, safeFocus, model, mcq)
+                val (setId, ids) = AppDatabase.get(getApplication()).withTransaction {
+                    val ids = mutableListOf<Long>()
+                    for (question in generated) {
+                        ids += dao.insertQuestion(
+                            QuestionEntity(
+                                english = question.english,
+                                level = question.level,
+                                topic = question.topic,
+                                focus = question.focus,
+                                choicesJson = JSONArray(question.multipleChoice?.options.orEmpty()).toString(),
+                                correctChoiceIndex = question.multipleChoice?.correctIndex ?: -1,
+                                answerExplanation = question.multipleChoice?.explanation.orEmpty()
+                            )
+                        )
+                    }
+
+                    val setId = dao.insertQuizSet(
+                        QuizSetEntity(
+                            profileId = pid,
+                            title = safeTitle,
+                            level = level,
+                            topic = safeTopic,
+                            focus = safeFocus,
+                            questionIdsJson = JSONArray(ids).toString()
                         )
                     )
+                    setId to ids
                 }
-
-                val setId = dao.insertQuizSet(
-                    QuizSetEntity(
-                        profileId = pid,
-                        title = safeTitle,
-                        level = level,
-                        topic = safeTopic,
-                        focus = safeFocus,
-                        questionIdsJson = JSONArray(ids).toString()
-                    )
-                )
                 val editor = prefs.edit().putLong(selectedQuizKey(pid), setId)
                 ids.firstOrNull()?.let { editor.putLong(selectedQuestionKey(setId), it) }
                 editor.apply()
@@ -369,6 +425,36 @@ class QuizViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 local.update { it.copy(loading = false, message = e.message ?: "Generation failed") }
                 AiErrorDialogActivity.show(getApplication(), "generating a quiz", e)
+            }
+        }
+    }
+
+    fun loadHints() {
+        val snapshot = state.value
+        val question = snapshot.questions.firstOrNull { it.id == snapshot.selectedQuestionId } ?: return
+        if (question.id in snapshot.hintsLoading || question.id in snapshot.hints) return
+        // Include the sentence so an edited/restored question cannot reuse unrelated hints.
+        val cacheKey = "${question.id}_${question.english}_${question.level}_${question.focus}"
+        val cached = runCatching {
+            val obj = JSONObject(hintCache.getString(cacheKey, null) ?: return@runCatching null)
+            val arr = obj.getJSONArray("words")
+            QuestionHints((0 until arr.length()).map { arr.getString(it) }, obj.getString("grammar"))
+        }.getOrNull()
+        if (cached != null) {
+            local.update { it.copy(hints = it.hints + (question.id to cached)) }
+            return
+        }
+        local.update { it.copy(hintsLoading = it.hintsLoading + question.id, hintErrors = it.hintErrors - question.id) }
+        viewModelScope.launch {
+            try {
+                val result = ai.hints(question, snapshot.selectedModel)
+                hintCache.edit().putString(cacheKey, JSONObject()
+                    .put("words", JSONArray(result.words)).put("grammar", result.grammar).toString()).apply()
+                local.update { it.copy(hints = it.hints + (question.id to result)) }
+            } catch (e: Exception) {
+                local.update { it.copy(hintErrors = it.hintErrors + (question.id to (e.message ?: "Could not load hints. Try again."))) }
+            } finally {
+                local.update { it.copy(hintsLoading = it.hintsLoading - question.id) }
             }
         }
     }

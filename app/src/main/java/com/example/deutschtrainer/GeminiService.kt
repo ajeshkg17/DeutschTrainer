@@ -4,8 +4,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
 import java.net.URL
+import java.io.File
+import android.util.Base64
 
 data class Evaluation(
     val score: Int,
@@ -13,17 +14,72 @@ data class Evaluation(
     val shortFeedback: String,
     val mistakes: List<String>,
     val howToImprove: List<String>,
-    val grammarTopics: List<String>
+    val grammarTopics: List<String>,
+    val transcript: String? = null
 )
 
 data class GeneratedQuestion(
     val english: String,
     val level: String,
     val topic: String,
-    val focus: String
+    val focus: String,
+    val multipleChoice: MultipleChoice? = null
 )
 
+data class QuestionHints(val words: List<String>, val grammar: String)
+
 class GeminiService(private val keyStore: ApiKeyStore) {
+    private val http = AiHttpClient()
+
+    suspend fun hints(question: QuestionEntity, model: AiModel): QuestionHints {
+        val prompt = """
+Help a German learner translate this English sentence: ${question.english}
+CEFR level: ${question.level}. Grammar focus: ${question.focus}.
+Give 3 to 7 useful vocabulary hints, each as an English word or phrase → German equivalent.
+Include noun articles and plurals where useful, verb infinitives and relevant past participles,
+and important connecting words. Keep words in dictionary form rather than sentence order.
+Give one short, concrete grammar tip in English for this sentence.
+Do not give the full translated sentence or assemble the answer.
+Return ONLY JSON: {"words": ["English → German"], "grammar": "short tip"}.
+""".trimIndent()
+        val obj = JSONObject(cleanJson(generate(prompt, model)))
+        val words = obj.optJSONArray("words")?.toStringList().orEmpty().filter { it.isNotBlank() }.take(7)
+        check(words.isNotEmpty()) { "No word hints were returned. Please try again." }
+        return QuestionHints(words, obj.optString("grammar"))
+    }
+
+    suspend fun evaluateRecording(english: String, level: String, audio: File, model: AiModel): Evaluation = withContext(Dispatchers.IO) {
+        require(model.provider == AiProvider.GEMINI) { "Select a Gemini model in Settings for speaking feedback." }
+        require(audio.exists() && audio.length() in 1..10_000_000) { "Recording is missing or too large. Please record again." }
+        val prompt = """
+You are a constructive German speaking coach. Listen to the attached learner audio.
+English sentence to translate: $english
+Target CEFR level: $level
+Transcribe the German exactly as spoken, including mistakes. Do not substitute a correct translation.
+If there is no intelligible German speech, return an empty transcript and explain that a new recording is needed.
+Give pronunciation_feedback and fluency_feedback based ONLY on audible evidence:
+German sounds, word stress, rhythm, pauses, hesitations and intelligibility. Quote specific words or timestamps
+when possible, and give concrete practice advice in speaking_practice. Do not infer pronunciation from spelling
+or penalize accent alone. If noise or a short sample prevents assessment, say so.
+Do not grade the translation, grammar, or vocabulary: a separate text examiner will do that.
+Return ONLY valid JSON with transcript (string), pronunciation_feedback (string),
+fluency_feedback (string), speaking_practice (string array).
+""".trimIndent()
+        val obj = JSONObject(cleanJson(geminiRequest(prompt, model, audio)))
+        val transcript = obj.optString("transcript").trim()
+        check(transcript.isNotBlank()) { "No intelligible German speech was detected. Listen to your recording and try again." }
+        // Assess the transcript without audio so accent and pauses cannot bias grammar scoring.
+        val translation = evaluate(english, transcript, level, model)
+        translation.copy(
+            shortFeedback = listOf(
+                translation.shortFeedback,
+                "Pronunciation: ${obj.optString("pronunciation_feedback", "This sample could not be assessed.")}",
+                "Fluency: ${obj.optString("fluency_feedback", "This sample could not be assessed.")}"
+            ).joinToString("\n\n"),
+            howToImprove = (translation.howToImprove + obj.optJSONArray("speaking_practice")?.toStringList().orEmpty()).distinct(),
+            transcript = transcript
+        )
+    }
 
     suspend fun evaluate(english: String, answer: String, level: String, model: AiModel): Evaluation {
         val prompt = """
@@ -69,7 +125,21 @@ Return ONLY valid JSON in this exact structure:
         )
     }
 
-    suspend fun generateQuestions(count: Int, level: String, topic: String, focus: String, model: AiModel): List<GeneratedQuestion> {
+    suspend fun generateQuestions(count: Int, level: String, topic: String, focus: String, model: AiModel, mcq: Boolean = false): List<GeneratedQuestion> {
+        val answerInstructions = if (mcq) """
+For each English sentence, provide four German translation options in an "options" string array.
+Exactly ONE option must be a fully correct, natural translation; the other three must have clear
+grammar or meaning errors, not merely acceptable alternative wording. Match the requested level.
+Vary the position of the correct answer across the set. Include "correct_index" (integer 0 to 3)
+and "explanation" (concise English explanation of why the correct translation works and what is
+wrong with the distractors). Check the answer key carefully. Do not label the answer in option text.
+In explanations refer to the German text, not option letters or numbers.
+""".trimIndent() else "Do not give German answers, translations, hints or explanations."
+        val answerFields = if (mcq) """,
+      "options": ["German option", "German option", "German option", "German option"],
+      "correct_index": 0,
+      "explanation": "Why the correct translation works and why the others are wrong"
+""".trimEnd() else ""
         val prompt = """
 Create exactly $count English-to-German translation practice questions.
 
@@ -86,7 +156,7 @@ Learning-design requirements:
 - Vary sentence length, tense, clause structure, subject, vocabulary and communicative situation.
 - Include a realistic mixture of statements, requests, questions, reasons, conditions and time relationships where suitable.
 - Do not produce duplicate or near-duplicate sentences inside the set.
-- Do not give German answers, translations, hints or explanations.
+- $answerInstructions
 - Avoid trick questions and unnecessarily obscure vocabulary.
 - Make the set useful for repeated real-world practice rather than a list of tiny variations of one sentence.
 
@@ -97,25 +167,34 @@ Return ONLY valid JSON:
       "english": "...",
       "level": "$level",
       "topic": "$topic",
-      "focus": "$focus"
+      "focus": "$focus"$answerFields
     }
   ]
 }
 """.trimIndent()
         val arr = JSONObject(cleanJson(generate(prompt, model))).getJSONArray("questions")
-        return buildList {
+        val questions = buildList {
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
+                require(o.getString("english").isNotBlank()) { "The AI returned an empty question. Please generate again." }
                 add(
                     GeneratedQuestion(
                         english = o.getString("english"),
                         level = o.optString("level", level),
                         topic = o.optString("topic", topic),
-                        focus = o.optString("focus", focus)
+                        focus = o.optString("focus", focus),
+                        multipleChoice = if (mcq) {
+                            val options = o.getJSONArray("options")
+                            val index = o.get("correct_index")
+                            require(index is Number && index.toDouble() == index.toInt().toDouble()) { "Invalid MCQ answer key. Try generating again." }
+                            MultipleChoice(List(options.length()) { options.getString(it).trim() }, index.toInt(), o.getString("explanation").trim())
+                        } else null
                     )
                 )
             }
         }.distinctBy { it.english.trim().lowercase() }.take(count)
+        require(questions.size == count) { "The AI returned an incomplete quiz. Please generate again." }
+        return questions
     }
 
     suspend fun explain(
@@ -163,23 +242,32 @@ Use clear English for explanations and German for examples. Be concise enough fo
         }
     }
 
-    private fun geminiRequest(prompt: String, model: AiModel): String {
+    private fun geminiRequest(prompt: String, model: AiModel, audio: File? = null): String {
         val key = keyStore.geminiKey()
         check(key.isNotBlank()) { "Add your Gemini API key in Settings before continuing." }
-        val url = URL("https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=$key")
+        val url = URL("https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent")
+        val parts = JSONArray().put(JSONObject().put("text", prompt))
+        if (audio != null) {
+            parts.put(JSONObject().put("inline_data", JSONObject()
+                .put("mime_type", "audio/mp4")
+                .put("data", Base64.encodeToString(audio.readBytes(), Base64.NO_WRAP))))
+        }
         val body = JSONObject().put(
             "contents",
-            JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", prompt))))
+            JSONArray().put(JSONObject().put("parts", parts))
         )
-        return httpPost(url, body, mapOf("Content-Type" to "application/json")) { root ->
-            root.optJSONArray("candidates")
+        if (audio != null) body.put("generationConfig", JSONObject().put("responseMimeType", "application/json"))
+        return httpPost(url, body, mapOf("Content-Type" to "application/json", "x-goog-api-key" to key),
+            readTimeoutMs = if (audio != null) 120_000 else 60_000) { root ->
+            val responseParts = root.optJSONArray("candidates")
                 ?.optJSONObject(0)
                 ?.optJSONObject("content")
                 ?.optJSONArray("parts")
-                ?.optJSONObject(0)
-                ?.optString("text")
-                ?.ifBlank { null }
                 ?: error("Gemini returned no text")
+            (0 until responseParts.length()).mapNotNull { index ->
+                responseParts.optJSONObject(index)?.takeUnless { it.optBoolean("thought") }
+                    ?.optString("text")?.takeIf { it.isNotBlank() }
+            }.joinToString("\n").ifBlank { error("Gemini returned no text") }
         }
     }
 
@@ -208,25 +296,10 @@ Use clear English for explanations and German for examples. Be concise enough fo
         url: URL,
         json: JSONObject,
         headers: Map<String, String>,
+        readTimeoutMs: Int = 60_000,
         parse: (JSONObject) -> String
     ): String {
-        val connection = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "POST"
-            connectTimeout = 30_000
-            readTimeout = 60_000
-            doOutput = true
-            headers.forEach { (k, v) -> setRequestProperty(k, v) }
-        }
-        try {
-            connection.outputStream.bufferedWriter().use { it.write(json.toString()) }
-            val code = connection.responseCode
-            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) error("AI request failed ($code): ${text.take(500)}")
-            return parse(JSONObject(text))
-        } finally {
-            connection.disconnect()
-        }
+        return parse(JSONObject(http.post(url, json.toString(), headers, readTimeoutMs)))
     }
 
     private fun cleanJson(text: String): String {
